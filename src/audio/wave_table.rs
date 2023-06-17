@@ -1,14 +1,15 @@
-pub struct WaveTable {
-    pub size: usize,
-    pub table: Vec<f32>,
-    wave_type: WaveType,
-}
 pub enum WaveType {
     Sine,
     Sawtooth,
     Triangle,
     Square,
     Pulse,
+}
+
+pub struct WaveTable {
+    pub size: usize,
+    pub table: Vec<f32>,
+    wave_type: WaveType,
 }
 
 impl WaveTable {
@@ -91,6 +92,35 @@ impl WaveTableOscillator {
     }
 }
 
+// ! Trait Implemenations
+
+impl Iterator for WaveTableOscillator {
+    type Item = f32;
+    fn next(&mut self) -> Option<Self::Item> {
+        return Some(self.get_sample());
+    }
+}
+
+use rodio::Source;
+
+impl Source for WaveTableOscillator {
+    fn channels(&self) -> u16 {
+        return 1;
+    }
+
+    fn sample_rate(&self) -> u32 {
+        return self.sample_rate;
+    }
+
+    fn current_frame_len(&self) -> Option<usize> {
+        return None;
+    }
+
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        return None;
+    }
+}
+
 impl WaveTableOscillator {
     pub fn get_raw_normalized_table(&self) -> Vec<[f32; 2]> {
         let mut table = Vec::with_capacity(self.wave_table.size);
@@ -125,34 +155,5 @@ impl WaveTableOscillator {
                 format: wgpu::VertexFormat::Float32x2,
             }],
         }
-    }
-}
-
-// ! Trait Implemenations
-
-impl Iterator for WaveTableOscillator {
-    type Item = f32;
-    fn next(&mut self) -> Option<Self::Item> {
-        return Some(self.get_sample());
-    }
-}
-
-use rodio::Source;
-
-impl Source for WaveTableOscillator {
-    fn channels(&self) -> u16 {
-        return 1;
-    }
-
-    fn sample_rate(&self) -> u32 {
-        return self.sample_rate;
-    }
-
-    fn current_frame_len(&self) -> Option<usize> {
-        return None;
-    }
-
-    fn total_duration(&self) -> Option<std::time::Duration> {
-        return None;
     }
 }

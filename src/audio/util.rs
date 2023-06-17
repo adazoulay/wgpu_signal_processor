@@ -40,10 +40,6 @@ pub fn get_file() -> (Vec<f32>, u32) {
     (samples, sample_rate as u32)
 }
 
-pub fn compute_sice_size(sample_rate: f32, frame_rate: f32) -> usize {
-    return (sample_rate / frame_rate) as usize;
-}
-
 pub fn get_table_time(audio_samples: &[f32]) -> (Vec<f32>, f32) {
     let mut max_amplitude = 0.0_f32;
 

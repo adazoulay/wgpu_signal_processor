@@ -7,9 +7,6 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 struct State {
     surface: wgpu::Surface,
     device: wgpu::Device,
@@ -83,7 +80,6 @@ impl State {
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
-
         surface.configure(&device, &config);
 
         // --------- DATA --------- //
@@ -218,29 +214,6 @@ impl State {
         }
     }
 
-    fn update_vertex_buffer(&mut self) {
-        self.frame_number += 1;
-        let start_vertex = self.frame_number * self.slice_size;
-        let end_vertex = start_vertex + self.slice_size;
-
-        let samples_slice = &self.audio_state.samples[start_vertex..end_vertex];
-        self.queue
-            .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(samples_slice));
-    }
-
-    fn window(&self) -> &Window {
-        &self.window
-    }
-
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width > 0 && new_size.height > 0 {
-            self.size = new_size;
-            self.config.width = new_size.width;
-            self.config.height = new_size.height;
-            self.surface.configure(&self.device, &self.config);
-        }
-    }
-
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -287,18 +260,19 @@ impl State {
 
         Ok(())
     }
+
+    fn update_vertex_buffer(&mut self) {
+        self.frame_number += 1;
+        let start_vertex = self.frame_number * self.slice_size;
+        let end_vertex = start_vertex + self.slice_size;
+
+        let samples_slice = &self.audio_state.samples[start_vertex..end_vertex];
+        self.queue
+            .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(samples_slice));
+    }
 }
 
 pub async fn run(audio_state: AudioState) {
-    cfg_if::cfg_if! {
-        if #[cfg(target_arch = "wasm32")] {
-            std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-            console_log::init_with_level(log::Level::Warn).expect("Couldn't initialize logger");
-        } else {
-            env_logger::init();
-        }
-    }
-
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
@@ -354,4 +328,19 @@ pub async fn run(audio_state: AudioState) {
             _ => {}
         }
     });
+}
+
+impl State {
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.size = new_size;
+            self.config.width = new_size.width;
+            self.config.height = new_size.height;
+            self.surface.configure(&self.device, &self.config);
+        }
+    }
+
+    fn window(&self) -> &Window {
+        &self.window
+    }
 }
