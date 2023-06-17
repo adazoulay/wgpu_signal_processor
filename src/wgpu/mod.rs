@@ -1,1 +1,1 @@
-pub mod wave_table_viz;
+pub mod visualizer;

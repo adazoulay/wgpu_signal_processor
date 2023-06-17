@@ -1,6 +1,7 @@
 // vertex shader
 struct VertexInput {
-    @location(0) position: vec2<f32>
+    @location(0) position: f32, //! Instead of vec2<f32>, single vec<f32>. Use 1 / pid to plot x coordinates
+    @builtin(vertex_index) vertex_idx: u32
 }
 
 struct VertexOutput {
@@ -8,46 +9,50 @@ struct VertexOutput {
 }
 
 
-@group(0) @binding(0) var<uniform> bounds: vec4<f32>;
+@group(0) @binding(0) var<uniform> uniform_buffer: vec4<f32>;
+
+
+
+@vertex
+fn freq_domain_main(in: VertexInput) -> VertexOutput {    
+    let local_uniform = uniform_buffer;
+    
+    let i = f32(in.vertex_idx);
+    let x = ((2.0 * i) / local_uniform[1]) - 1.0; 
+
+    let y = (in.position / local_uniform[0]) * 1.5; 
+
+    var out: VertexOutput;
+    out.position = vec4<f32>(x , y, 0.0, 1.0);
+    return out;
+}
 
 
 @vertex
 fn time_domain_main(in: VertexInput) -> VertexOutput {    
-    var out: VertexOutput;
+   let local_uniform = uniform_buffer;
     
-    let min_value = f32(0);
-    let max_value = bounds[0];
+    let i = f32(in.vertex_idx);
+    let x = ((2.0 * i) / local_uniform[1]) - 1.0; 
 
-    let x = in.position[0];
-    let y = 2.0 * (in.position[1] - min_value) / (max_value - min_value) - 1.0;
+    let y = (in.position / local_uniform[0]) * 1.5; 
 
-    out.position = vec4<f32>(x, y, 0.0, 1.0);
-    return out;
-
-}
-
-@vertex
-fn freq_domain_main(in: VertexInput) -> VertexOutput {    
     var out: VertexOutput;
-
-    let max_amplitude = bounds[0];
-    let scale_factor = 1.0 / max_amplitude;
-
-    let slice_size = bounds[1];
-
-    let x = -1.0 + ((2.0 * in.position[0] )/ (slice_size - f32(1)));
-    let y = in.position[1] * scale_factor;
-
-    out.position = vec4<f32>(x, y, 0.0, 1.0);
+    out.position = vec4<f32>(x , y, 0.0, 1.0);
     return out;
-}
 
+}
 
 
 // fragment shader
-
 @fragment
 fn fs_main() -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 0.0, 0.0, 1.0);
 }
  
+
+
+
+
+
+

@@ -1,5 +1,4 @@
-use crate::audio::read_file;
-use crate::audio::util::{compute_fft, compute_sice_size, compute_time_domain, get_file};
+use crate::audio::audio_state::{AudioState, SpectrumType};
 
 use wgpu::util::DeviceExt;
 use winit::{
@@ -10,55 +9,6 @@ use winit::{
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-
-enum SpectrumType {
-    Time,
-    Frequency,
-}
-
-// impl SpectrumType {
-//     fn value(&self) -> u32 {
-//         match *self {
-//             SpectrumType::Time => 0,
-//             SpectrumType::Frequency => 1,
-//         }
-//     }
-// }
-
-struct AudioState {
-    spectrum_type: SpectrumType,
-    samples: Vec<[f32; 2]>,
-    size: usize,
-    sample_rate: u32,
-    max_amplitude: f32,
-    slice_size: usize,
-}
-
-use std::error::Error;
-use std::fs::File;
-use std::io::Write;
-
-impl AudioState {
-    fn new(spectrum_type: SpectrumType) -> Self {
-        let (samples, sample_rate) = get_file();
-        let size = samples.len();
-        let slice_size = compute_sice_size(sample_rate as f32, 60.0);
-
-        let (samples, max_amplitude) = match spectrum_type {
-            SpectrumType::Frequency => compute_fft(bytemuck::cast_slice(&samples), slice_size),
-            SpectrumType::Time => compute_time_domain(&bytemuck::cast_slice(&samples), sample_rate),
-        };
-
-        Self {
-            spectrum_type,
-            samples,
-            size,
-            sample_rate,
-            max_amplitude,
-            slice_size,
-        }
-    }
-}
 
 struct State {
     surface: wgpu::Surface,
@@ -76,7 +26,7 @@ struct State {
 }
 
 impl State {
-    async fn new(window: Window) -> Self {
+    async fn new(window: Window, audio_state: AudioState) -> Self {
         // --------- SETUP --------- //
 
         let size = window.inner_size();
@@ -140,23 +90,24 @@ impl State {
 
         // ! Buffers
 
-        let audio_state = AudioState::new(SpectrumType::Frequency);
-
         // * Vertex Buffer
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let buffer_size = (std::mem::size_of::<f32>() * audio_state.slice_size) as u64;
+
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(&audio_state.samples),
-            usage: wgpu::BufferUsages::VERTEX,
+            size: buffer_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
         let vertex_buffer_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+            array_stride: std::mem::size_of::<f32>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[wgpu::VertexAttribute {
                 offset: 0,
                 shader_location: 0,
-                format: wgpu::VertexFormat::Float32x2,
+                format: wgpu::VertexFormat::Float32,
             }],
         };
 
@@ -190,9 +141,7 @@ impl State {
             label: Some("bindgroup layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX
-                    | wgpu::ShaderStages::COMPUTE
-                    | wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -271,6 +220,12 @@ impl State {
 
     fn update_vertex_buffer(&mut self) {
         self.frame_number += 1;
+        let start_vertex = self.frame_number * self.slice_size;
+        let end_vertex = start_vertex + self.slice_size;
+
+        let samples_slice = &self.audio_state.samples[start_vertex..end_vertex];
+        self.queue
+            .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(samples_slice));
     }
 
     fn window(&self) -> &Window {
@@ -324,9 +279,7 @@ impl State {
             render_pass.set_bind_group(0, &self.bind_group, &[]);
 
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            let start_vertex = self.frame_number * self.slice_size;
-            let end_vertex = start_vertex + self.slice_size;
-            render_pass.draw(start_vertex as u32..end_vertex as u32, 0..1);
+            render_pass.draw(0..(self.slice_size as u32), 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -336,7 +289,7 @@ impl State {
     }
 }
 
-pub async fn run() {
+pub async fn run(audio_state: AudioState) {
     cfg_if::cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -349,8 +302,8 @@ pub async fn run() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    // State::new uses async code, so we're going to wait for it to finish
-    let mut state = State::new(window).await;
+    // ! STATE SETUP
+    let mut state = State::new(window, audio_state).await;
 
     event_loop.run(move |event, _, control_flow| {
         match event {
