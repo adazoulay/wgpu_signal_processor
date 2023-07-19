@@ -18,12 +18,11 @@ struct State {
     vertex_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     render_pipeline: wgpu::RenderPipeline,
-    frame_number: usize,
-    audio_state: AudioState,
 }
 
 impl State {
-    async fn new(window: Window, audio_state: AudioState) -> Self {
+    async fn new(window: Window, audio_state: &Arc<Mutex<AudioState>>) -> Self {
+        let audio_state = audio_state.lock().unwrap();
         // --------- SETUP --------- //
 
         let size = window.inner_size();
@@ -209,8 +208,6 @@ impl State {
             vertex_buffer,
             bind_group,
             render_pipeline,
-            frame_number: 0,
-            audio_state,
         }
     }
 
@@ -236,9 +233,9 @@ impl State {
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.1,
-                                g: 0.2,
-                                b: 0.3,
+                                r: 0.0,
+                                g: 0.0,
+                                b: 0.0,
                                 a: 1.0,
                             }),
                             store: true,
@@ -261,23 +258,20 @@ impl State {
         Ok(())
     }
 
-    fn update_vertex_buffer(&mut self) {
-        self.frame_number += 1;
-        let start_vertex = self.frame_number * self.slice_size;
-        let end_vertex = start_vertex + self.slice_size;
-
-        let samples_slice = &self.audio_state.samples[start_vertex..end_vertex];
+    fn update_vertex_buffer(&mut self, new_slice: &[f32]) {
         self.queue
-            .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(samples_slice));
+            .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(new_slice));
     }
 }
 
-pub async fn run(audio_state: AudioState) {
+use std::sync::{Arc, Mutex};
+
+pub async fn run(audio_state: Arc<Mutex<AudioState>>) {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     // ! STATE SETUP
-    let mut state = State::new(window, audio_state).await;
+    let mut state = State::new(window, &audio_state).await;
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -307,7 +301,8 @@ pub async fn run(audio_state: AudioState) {
                 }
             }
             Event::RedrawRequested(window_id) if window_id == state.window().id() => {
-                state.update_vertex_buffer();
+                let mut audio_state = audio_state.lock().unwrap();
+                state.update_vertex_buffer(audio_state.get_next_slice().unwrap());
                 match state.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated

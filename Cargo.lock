@@ -161,6 +161,7 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "cgmath",
+ "cpal",
  "env_logger",
  "flac",
  "log",

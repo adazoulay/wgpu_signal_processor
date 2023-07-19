@@ -1,10 +1,12 @@
 use crate::audio::util::{get_table_freq, get_table_time};
 
+#[derive(Clone)]
 pub enum SpectrumType {
     Time,
     Frequency,
 }
 
+#[derive(Clone)]
 pub struct AudioState {
     pub spectrum_type: SpectrumType,
     pub samples: Vec<f32>,
@@ -22,13 +24,14 @@ pub fn compute_sice_size(sample_rate: f32, frame_rate: f32) -> usize {
 
 impl AudioState {
     pub fn new(spectrum_type: SpectrumType, samples: Vec<f32>, sample_rate: u32) -> Self {
-        let size = samples.len();
         let slice_size = compute_sice_size(sample_rate as f32, 60.0);
 
         let (samples, max_amplitude) = match spectrum_type {
             SpectrumType::Frequency => get_table_freq(samples, slice_size),
             SpectrumType::Time => get_table_time(&samples),
         };
+
+        let size = samples.len();
 
         Self {
             spectrum_type,
@@ -42,6 +45,12 @@ impl AudioState {
         }
     }
 
+    pub fn get_slice(&mut self) -> Option<&[f32]> {
+        let slice = &self.samples
+            [self.slice_index * self.slice_size..(self.slice_index + 1) * self.slice_size];
+        Some(slice)
+    }
+
     pub fn get_next_slice(&mut self) -> Option<&[f32]> {
         if self.slice_index * self.slice_size >= self.size {
             return None;
@@ -50,12 +59,6 @@ impl AudioState {
             [self.slice_index * self.slice_size..(self.slice_index + 1) * self.slice_size];
         self.slice_index += 1;
         self.index = 0;
-        Some(slice)
-    }
-
-    pub fn get_slice(&mut self) -> Option<&[f32]> {
-        let slice = &self.samples
-            [self.slice_index * self.slice_size..(self.slice_index + 1) * self.slice_size];
         Some(slice)
     }
 
