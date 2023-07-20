@@ -21,8 +21,7 @@ struct State {
 }
 
 impl State {
-    async fn new(window: Window, audio_state: &Arc<Mutex<AudioState>>) -> Self {
-        let audio_state = audio_state.lock().unwrap();
+    async fn new(window: Window, audio_state: &AudioState) -> Self {
         // --------- SETUP --------- //
 
         let size = window.inner_size();
@@ -264,9 +263,7 @@ impl State {
     }
 }
 
-use std::sync::{Arc, Mutex};
-
-pub async fn run(audio_state: Arc<Mutex<AudioState>>) {
+pub async fn run_visualizer(mut audio_state: AudioState) {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
@@ -301,7 +298,6 @@ pub async fn run(audio_state: Arc<Mutex<AudioState>>) {
                 }
             }
             Event::RedrawRequested(window_id) if window_id == state.window().id() => {
-                let mut audio_state = audio_state.lock().unwrap();
                 state.update_vertex_buffer(audio_state.get_next_slice().unwrap());
                 match state.render() {
                     Ok(_) => {}
