@@ -1,6 +1,6 @@
 // vertex shader
 struct VertexInput {
-    @location(0) position: f32, //! Instead of vec2<f32>, single vec<f32>. Use 1 / pid to plot x coordinates
+    @location(0) position: f32, 
     @builtin(vertex_index) vertex_idx: u32
 }
 

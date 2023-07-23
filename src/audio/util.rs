@@ -32,7 +32,7 @@ pub fn get_file() -> (Vec<f32>, u32) {
     {
         sample_rate = sr;
         for sample in data {
-            let f = sample as f32;
+            let f = sample as f32 / 32768.0; // Normalize to -1.0 to 1.0
             samples.push(f);
         }
     }

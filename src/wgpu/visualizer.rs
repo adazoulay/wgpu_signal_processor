@@ -7,6 +7,10 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+use std::sync::{Arc, Mutex};
+
+use rustfft::{num_complex::Complex, FftPlanner};
+
 struct State {
     surface: wgpu::Surface,
     device: wgpu::Device,
@@ -16,13 +20,15 @@ struct State {
     window: Window,
     slice_size: usize,
     vertex_buffer: wgpu::Buffer,
+    audio_data_buffer: Vec<f32>,
     bind_group: wgpu::BindGroup,
     render_pipeline: wgpu::RenderPipeline,
 }
 
 impl State {
-    async fn new(window: Window, audio_state: &AudioState) -> Self {
+    async fn new(window: Window, audio_state: &Arc<Mutex<AudioState>>) -> Self {
         // --------- SETUP --------- //
+        let audio_state = audio_state.lock().unwrap();
 
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -204,6 +210,7 @@ impl State {
             size,
             window,
             slice_size: audio_state.slice_size,
+            audio_data_buffer: Vec::new(),
             vertex_buffer,
             bind_group,
             render_pipeline,
@@ -257,13 +264,24 @@ impl State {
         Ok(())
     }
 
-    fn update_vertex_buffer(&mut self, new_slice: &[f32]) {
-        self.queue
-            .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(new_slice));
+    fn update_vertex_buffer(&mut self, new_slice: Vec<f32>) {
+        self.audio_data_buffer.extend(new_slice);
+
+        if self.audio_data_buffer.len() >= self.slice_size {
+            self.queue.write_buffer(
+                &self.vertex_buffer,
+                0,
+                bytemuck::cast_slice(&self.audio_data_buffer[0..self.slice_size]),
+            );
+            self.audio_data_buffer.drain(..self.slice_size);
+        }
     }
 }
 
-pub async fn run_visualizer(mut audio_state: AudioState) {
+pub async fn run_visualizer(
+    audio_state: Arc<Mutex<AudioState>>,
+    rx: std::sync::mpsc::Receiver<f32>,
+) {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
@@ -298,7 +316,13 @@ pub async fn run_visualizer(mut audio_state: AudioState) {
                 }
             }
             Event::RedrawRequested(window_id) if window_id == state.window().id() => {
-                state.update_vertex_buffer(audio_state.get_next_slice().unwrap());
+                let mut buffer = Vec::new();
+                while let Ok(value) = rx.try_recv() {
+                    buffer.push(value);
+                }
+
+                state.update_vertex_buffer(buffer);
+
                 match state.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
