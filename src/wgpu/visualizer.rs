@@ -264,8 +264,13 @@ impl State {
         Ok(())
     }
 
-    fn update_vertex_buffer(&mut self, new_slice: Vec<f32>) {
+    fn update_vertex_buffer(&mut self, mut new_slice: Vec<f32>) {
+        if new_slice.len() > self.slice_size {
+            new_slice.truncate(self.slice_size);
+        }
         self.audio_data_buffer.extend(new_slice);
+
+        println!("audio_data_buffer {}", self.audio_data_buffer.len());
 
         if self.audio_data_buffer.len() >= self.slice_size {
             self.queue.write_buffer(
@@ -280,7 +285,7 @@ impl State {
 
 pub async fn run_visualizer(
     audio_state: Arc<Mutex<AudioState>>,
-    rx: std::sync::mpsc::Receiver<f32>,
+    rx: std::sync::mpsc::Receiver<Vec<f32>>,
 ) {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
@@ -316,12 +321,19 @@ pub async fn run_visualizer(
                 }
             }
             Event::RedrawRequested(window_id) if window_id == state.window().id() => {
-                let mut buffer = Vec::new();
-                while let Ok(value) = rx.try_recv() {
-                    buffer.push(value);
+                let mut chunks = Vec::new();
+                while let Ok(chunk) = rx.try_recv() {
+                    chunks.push(chunk);
                 }
 
-                state.update_vertex_buffer(buffer);
+                if chunks.is_empty() {
+                    return;
+                }
+
+                let slice_size: usize = 940;
+                let averaged_chunk = average_chunks(chunks, slice_size);
+                let fft_chunk = compute_fft(averaged_chunk, slice_size);
+                state.update_vertex_buffer(fft_chunk);
 
                 match state.render() {
                     Ok(_) => {}
@@ -358,4 +370,52 @@ impl State {
     fn window(&self) -> &Window {
         &self.window
     }
+}
+
+fn average_chunks(chunks: Vec<Vec<f32>>, slice_size: usize) -> Vec<f32> {
+    if chunks.is_empty() {
+        return Vec::new();
+    }
+
+    let chunk_len = chunks.len();
+    let mut averaged_chunk = vec![0.0; slice_size];
+
+    for i in 0..slice_size {
+        let sum: f32 = chunks
+            .iter()
+            .map(|chunk| chunk.get(i % chunk.len()).unwrap_or(&0.0))
+            .sum();
+        averaged_chunk[i] = sum / chunk_len as f32;
+    }
+
+    averaged_chunk
+}
+
+pub fn compute_fft(chunk: Vec<f32>, slice_size: usize) -> Vec<f32> {
+    let fft = FftPlanner::new().plan_fft_forward(slice_size * 2); // double the FFT size
+
+    // Define Hanning window
+    let window: Vec<f32> = (0..slice_size)
+        .map(|i| {
+            0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (slice_size - 1) as f32).cos())
+        })
+        .collect();
+
+    // Apply FFT to the slice with zero padding
+    let mut fft_input: Vec<Complex<f32>> = chunk
+        .iter()
+        .enumerate()
+        .map(|(i, &x)| Complex::new(x * window[i], 0.0))
+        .collect();
+
+    // Zero padding
+    fft_input.resize(slice_size * 2, Complex::new(0.0, 0.0));
+    fft.process(&mut fft_input);
+
+    // Convert to magnitude and normalize FFT output, return only first half of the data
+    fft_input
+        .iter()
+        .take(slice_size) // Only take first half of the data
+        .map(|x| (x.norm() / (slice_size * 2) as f32).sqrt()) // sqrt for perceptual scaling, divided by slice_size to normalize FFT output
+        .collect()
 }

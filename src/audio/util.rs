@@ -9,19 +9,18 @@ use std::path::PathBuf;
 
 pub fn get_file() -> (Vec<f32>, u32) {
     let mut path = PathBuf::from(env::current_dir().unwrap());
-    path.push("src");
-    path.push("audio");
+    path.push("src/audio/");
     path.push("test.mp3");
 
     let mut mp3_data = Vec::new();
+
     File::open(&path)
         .unwrap()
         .read_to_end(&mut mp3_data)
         .unwrap();
+
     let mut mp3_decoder = Mp3Decoder::new(mp3_data.as_slice());
-
     let mut samples = Vec::new();
-
     let mut sample_rate = 0;
 
     while let Ok(Frame {
@@ -40,66 +39,30 @@ pub fn get_file() -> (Vec<f32>, u32) {
     (samples, sample_rate as u32)
 }
 
-pub fn get_table_time(audio_samples: &[f32]) -> (Vec<f32>, f32) {
-    let mut max_amplitude = 0.0_f32;
+pub fn get_max_amplitude_freq(samples: &Vec<f32>, reduced_slice_size: usize) -> f32 {
+    let fft = FftPlanner::new().plan_fft_forward(reduced_slice_size);
+    let num_slices = samples.len() / reduced_slice_size;
 
-    let result = audio_samples
-        .iter()
-        .map(|&sample| {
-            if sample.abs() > max_amplitude {
-                max_amplitude = sample.abs();
-            }
-            sample
-        })
-        .collect();
-
-    (result, max_amplitude)
-}
-
-pub fn get_table_freq(samples: Vec<f32>, slice_size: usize) -> (Vec<f32>, f32) {
-    let fft = FftPlanner::new().plan_fft_forward(slice_size);
-    let num_slices = samples.len() / slice_size;
-
-    let mut table = Vec::with_capacity(num_slices * slice_size);
     let mut max_amplitude = 0.0;
 
-    // Define Hanning window
-    let window: Vec<f32> = (0..slice_size)
-        .map(|i| {
-            0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (slice_size - 1) as f32).cos())
-        })
-        .collect();
-
     for slice_idx in 0..num_slices {
-        let start = slice_idx * slice_size;
-        let end = start + slice_size;
+        let start = slice_idx * reduced_slice_size;
+        let end = start + reduced_slice_size;
         let slice = &samples[start..end];
 
         // Apply FFT to the slice
-        let mut fft_input: Vec<Complex<f32>> = slice
-            .iter()
-            .enumerate()
-            .map(|(i, x)| Complex::new(*x * window[i], 0.0))
-            .collect();
+        let mut fft_input: Vec<Complex<f32>> =
+            slice.iter().map(|&x| Complex::new(x, 0.0)).collect();
         fft.process(&mut fft_input);
 
-        // Normalize the FFT results and convert the data
+        // Get the max amplitude
         for x in fft_input {
-            let y_component = (x.norm() / slice_size as f32).sqrt(); // sqrt for perceptual scaling, divided by slice_size to normalize FFT output
+            let y_component = (x.norm() / reduced_slice_size as f32).sqrt();
             if y_component > max_amplitude {
                 max_amplitude = y_component;
             }
-            table.push(y_component);
         }
     }
 
-    (table, max_amplitude)
-}
-
-pub fn hanning_window(length: usize) -> Vec<f32> {
-    (0..length)
-        .map(|i| {
-            0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (length as f32 - 1.0)).cos())
-        })
-        .collect()
+    max_amplitude
 }

@@ -1,4 +1,4 @@
-use crate::audio::util::{get_table_freq, get_table_time};
+use crate::audio::util::get_max_amplitude_freq;
 
 #[derive(Clone)]
 pub enum SpectrumType {
@@ -8,14 +8,34 @@ pub enum SpectrumType {
 
 #[derive(Clone)]
 pub struct AudioState {
-    pub spectrum_type: SpectrumType,
     pub samples: Vec<f32>,
-    pub size: usize,
     pub sample_rate: u32,
-    pub max_amplitude: f32,
     pub index: usize,
+    pub spectrum_type: SpectrumType,
+    pub size: usize,
+    pub max_amplitude: f32,
     pub slice_size: usize,
-    pub slice_index: usize,
+}
+
+pub struct AudioStateMetatada {
+    pub spectrum_type: SpectrumType,
+    pub size: usize,
+    pub slice_size: usize,
+    pub max_amplitude: f32,
+}
+
+impl AudioStateMetatada {
+    fn new(samples: &Vec<f32>, sample_rate: f32) -> Self {
+        let slice_size = compute_sice_size(sample_rate, 60.0);
+        let max_amplitude = get_max_amplitude_freq(&samples, slice_size);
+
+        Self {
+            spectrum_type: SpectrumType::Frequency,
+            size: samples.len(),
+            slice_size,
+            max_amplitude,
+        }
+    }
 }
 
 pub fn compute_sice_size(sample_rate: f32, frame_rate: f32) -> usize {
@@ -26,13 +46,14 @@ impl AudioState {
     pub fn new(spectrum_type: SpectrumType, samples: Vec<f32>, sample_rate: u32) -> Self {
         let slice_size = compute_sice_size(sample_rate as f32, 60.0);
 
-        let (samples, max_amplitude) = match spectrum_type {
-            SpectrumType::Frequency => get_table_freq(samples, slice_size),
-            SpectrumType::Time => get_table_time(&samples),
+        let max_amplitude = match spectrum_type {
+            SpectrumType::Frequency => get_max_amplitude_freq(&samples, slice_size),
+            SpectrumType::Time => 1.0,
         };
 
         let size = samples.len();
 
+        println!("max_amplitude: {}", max_amplitude);
         Self {
             spectrum_type,
             samples,
@@ -41,41 +62,15 @@ impl AudioState {
             max_amplitude,
             index: 0,
             slice_size,
-            slice_index: 0,
         }
-    }
-
-    pub fn get_slice(&mut self) -> Option<&[f32]> {
-        let slice = &self.samples
-            [self.slice_index * self.slice_size..(self.slice_index + 1) * self.slice_size];
-        Some(slice)
-    }
-
-    pub fn get_next_slice(&mut self) -> Option<&[f32]> {
-        if self.slice_index * self.slice_size >= self.size {
-            return None;
-        }
-        let slice = &self.samples
-            [self.slice_index * self.slice_size..(self.slice_index + 1) * self.slice_size];
-        self.slice_index += 1;
-        self.index = 0;
-        Some(slice)
     }
 
     pub fn get_sample(&mut self) -> Option<f32> {
-        if self.index >= self.slice_size {
-            if self.get_next_slice().is_none() {
-                return None;
-            }
-        }
-
-        let sample_index = self.slice_index * self.slice_size + self.index;
         self.index += 1;
-
-        if sample_index >= self.size {
+        if self.index >= self.size {
             None
         } else {
-            Some(self.samples[sample_index])
+            Some(self.samples[self.index])
         }
     }
 }
