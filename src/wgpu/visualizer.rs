@@ -1,4 +1,4 @@
-use crate::audio::audio_state::{AudioState, SpectrumType};
+use crate::audio::audio_state::{AudioStateMetatada, SpectrumType};
 
 use wgpu::util::DeviceExt;
 use winit::{
@@ -6,8 +6,6 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
-
-use std::sync::{Arc, Mutex};
 
 use rustfft::{num_complex::Complex, FftPlanner};
 
@@ -26,9 +24,8 @@ struct State {
 }
 
 impl State {
-    async fn new(window: Window, audio_state: &Arc<Mutex<AudioState>>) -> Self {
+    async fn new(window: Window, audio_state: &AudioStateMetatada) -> Self {
         // --------- SETUP --------- //
-        let audio_state = audio_state.lock().unwrap();
 
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -112,9 +109,6 @@ impl State {
         };
 
         // * Uniform Buffer
-        println!("audio_state.max_amplitude {}", audio_state.max_amplitude);
-        println!("audio_state.slice_size {}", audio_state.slice_size);
-
         let uniform_array: [f32; 4] = [
             audio_state.max_amplitude as f32,
             audio_state.slice_size as f32,
@@ -270,7 +264,7 @@ impl State {
         }
         self.audio_data_buffer.extend(new_slice);
 
-        println!("audio_data_buffer {}", self.audio_data_buffer.len());
+        // println!("audio_data_buffer {}", self.audio_data_buffer.len());
 
         if self.audio_data_buffer.len() >= self.slice_size {
             self.queue.write_buffer(
@@ -284,7 +278,7 @@ impl State {
 }
 
 pub async fn run_visualizer(
-    audio_state: Arc<Mutex<AudioState>>,
+    audio_state: AudioStateMetatada,
     rx: std::sync::mpsc::Receiver<Vec<f32>>,
 ) {
     let event_loop = EventLoop::new();
@@ -320,9 +314,11 @@ pub async fn run_visualizer(
                     _ => {}
                 }
             }
+            // ! Redraw Request
             Event::RedrawRequested(window_id) if window_id == state.window().id() => {
                 let mut chunks = Vec::new();
                 while let Ok(chunk) = rx.try_recv() {
+                    // println!("chunk {}", chunk.len());
                     chunks.push(chunk);
                 }
 
@@ -330,10 +326,19 @@ pub async fn run_visualizer(
                     return;
                 }
 
-                let slice_size: usize = 940;
-                let averaged_chunk = average_chunks(chunks, slice_size);
-                let fft_chunk = compute_fft(averaged_chunk, slice_size);
-                state.update_vertex_buffer(fft_chunk);
+                let processed = match audio_state.spectrum_type {
+                    SpectrumType::Frequency => {
+                        let slice_size = audio_state.slice_size;
+                        let averaged_chunk = average_chunks(chunks, slice_size);
+                        compute_fft(averaged_chunk, slice_size)
+                    }
+                    SpectrumType::Time => {
+                        let slice_size = audio_state.slice_size;
+                        average_chunks(chunks, slice_size)
+                    }
+                };
+
+                state.update_vertex_buffer(processed);
 
                 match state.render() {
                     Ok(_) => {}

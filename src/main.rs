@@ -1,4 +1,4 @@
-use audio_general::audio::audio_state::{AudioState, SpectrumType};
+use audio_general::audio::audio_state::AudioState;
 use audio_general::audio::util::get_file;
 
 use audio_general::wgpu::visualizer::run_visualizer;
@@ -7,7 +7,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
 
 struct AudioPlayer {
-    host: cpal::Host,
+    _host: cpal::Host,
     device: cpal::Device,
     supported_config: cpal::SupportedStreamConfig,
     stream_config: cpal::StreamConfig,
@@ -15,8 +15,8 @@ struct AudioPlayer {
 
 impl AudioPlayer {
     fn new(sample_rate: u32) -> Self {
-        let host = cpal::default_host();
-        let device = host.default_output_device().unwrap();
+        let _host = cpal::default_host();
+        let device = _host.default_output_device().unwrap();
         let supported_config: cpal::SupportedStreamConfig = device.default_output_config().unwrap();
         let stream_config = cpal::StreamConfig {
             channels: 2,
@@ -24,7 +24,7 @@ impl AudioPlayer {
             sample_rate: cpal::SampleRate(sample_rate),
         };
         Self {
-            host,
+            _host,
             device,
             supported_config,
             stream_config,
@@ -35,7 +35,7 @@ impl AudioPlayer {
 fn main() {
     let (samples, sample_rate) = get_file();
 
-    let audio_state = AudioState::new(SpectrumType::Time, samples, sample_rate);
+    let audio_state = AudioState::new(samples, sample_rate);
     let audio_player = AudioPlayer::new(sample_rate);
 
     match audio_player.supported_config.sample_format() {
@@ -53,6 +53,7 @@ fn run<T: cpal::Sample>(
     stream_config: cpal::StreamConfig,
     audio_state: AudioState,
 ) {
+    let audio_metadata = audio_state.get_metadata();
     let audio_state = Arc::new(Mutex::new(audio_state));
     let audio_state_stream = Arc::clone(&audio_state);
     let (tx, rx) = std::sync::mpsc::channel();
@@ -80,7 +81,7 @@ fn run<T: cpal::Sample>(
     stream.play().unwrap();
     println!("Stream was built");
 
-    pollster::block_on(run_visualizer(audio_state, rx));
+    pollster::block_on(run_visualizer(audio_metadata, rx));
 
     // Keep the main thread alive until you want to stop.
     loop {
