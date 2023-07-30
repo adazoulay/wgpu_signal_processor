@@ -55,17 +55,17 @@ fn run<T: cpal::Sample>(
 ) {
     let audio_metadata = audio_state.get_metadata();
     let audio_state = Arc::new(Mutex::new(audio_state));
-    let audio_state_stream = Arc::clone(&audio_state);
+
     let (tx, rx) = std::sync::mpsc::channel();
 
     let stream = device
         .build_output_stream(
             &stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                // Lock the audio_state for this scope
-                let mut audio_state = audio_state_stream.lock().unwrap();
+                let audio_state = Arc::clone(&audio_state);
                 let mut chunk = Vec::with_capacity(data.len());
 
+                let mut audio_state = audio_state.lock().unwrap();
                 for sample in data.iter_mut() {
                     // Get the next sample from the AudioState
                     let value = audio_state.get_sample().unwrap();

@@ -110,7 +110,7 @@ impl State {
 
         // * Uniform Buffer
         let uniform_array: [f32; 4] = [
-            audio_state.max_amplitude as f32,
+            audio_state.get_max_amplitude() as f32,
             audio_state.slice_size as f32,
             0 as f32,
             0 as f32,
@@ -264,8 +264,6 @@ impl State {
         }
         self.audio_data_buffer.extend(new_slice);
 
-        // println!("audio_data_buffer {}", self.audio_data_buffer.len());
-
         if self.audio_data_buffer.len() >= self.slice_size {
             self.queue.write_buffer(
                 &self.vertex_buffer,
@@ -318,7 +316,7 @@ pub async fn run_visualizer(
             Event::RedrawRequested(window_id) if window_id == state.window().id() => {
                 let mut chunks = Vec::new();
                 while let Ok(chunk) = rx.try_recv() {
-                    // println!("chunk {}", chunk.len());
+                    println!("chunk {}", chunk.len());
                     chunks.push(chunk);
                 }
 
@@ -329,11 +327,13 @@ pub async fn run_visualizer(
                 let processed = match audio_state.spectrum_type {
                     SpectrumType::Frequency => {
                         let slice_size = audio_state.slice_size;
+                        println!("slice_size {}", slice_size);
                         let averaged_chunk = average_chunks(chunks, slice_size);
                         compute_fft(averaged_chunk, slice_size)
                     }
                     SpectrumType::Time => {
                         let slice_size = audio_state.slice_size;
+                        println!("slice_size {}", slice_size);
                         average_chunks(chunks, slice_size)
                     }
                 };
@@ -399,7 +399,6 @@ fn average_chunks(chunks: Vec<Vec<f32>>, slice_size: usize) -> Vec<f32> {
 pub fn compute_fft(chunk: Vec<f32>, slice_size: usize) -> Vec<f32> {
     let fft = FftPlanner::new().plan_fft_forward(slice_size * 2); // double the FFT size
 
-    // Define Hanning window
     let window: Vec<f32> = (0..slice_size)
         .map(|i| {
             0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (slice_size - 1) as f32).cos())

@@ -28,7 +28,7 @@ impl AudioStateMetatada {
         let max_amplitude = get_max_amplitude_freq(&samples, slice_size);
 
         Self {
-            spectrum_type: SpectrumType::Time,
+            spectrum_type: SpectrumType::Frequency,
             size: samples.len(),
             slice_size,
             max_amplitude,
@@ -70,7 +70,7 @@ impl AudioState {
 }
 
 pub fn compute_sice_size(sample_rate: f32, frame_rate: f32) -> usize {
-    return (sample_rate / frame_rate) as usize;
+    return 8 * (sample_rate * 4.0 / frame_rate) as usize;
 }
 
 impl Iterator for AudioState {
