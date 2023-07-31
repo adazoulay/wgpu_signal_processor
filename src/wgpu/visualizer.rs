@@ -316,7 +316,7 @@ pub async fn run_visualizer(
             Event::RedrawRequested(window_id) if window_id == state.window().id() => {
                 let mut chunks = Vec::new();
                 while let Ok(chunk) = rx.try_recv() {
-                    println!("chunk {}", chunk.len());
+                    // println!("chunk {}", chunk.len());
                     chunks.push(chunk);
                 }
 
@@ -327,13 +327,13 @@ pub async fn run_visualizer(
                 let processed = match audio_state.spectrum_type {
                     SpectrumType::Frequency => {
                         let slice_size = audio_state.slice_size;
-                        println!("slice_size {}", slice_size);
+                        // println!("slice_size {}", slice_size);
                         let averaged_chunk = average_chunks(chunks, slice_size);
                         compute_fft(averaged_chunk, slice_size)
                     }
                     SpectrumType::Time => {
                         let slice_size = audio_state.slice_size;
-                        println!("slice_size {}", slice_size);
+                        // println!("slice_size {}", slice_size);
                         average_chunks(chunks, slice_size)
                     }
                 };

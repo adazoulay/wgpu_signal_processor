@@ -1,43 +1,5 @@
-// let mut audio_data = process_audio_data(&raw_audio_data);
-// normalize_coordinates(&mut audio_data);
-use minimp3::{Decoder as Mp3Decoder, Frame};
 use rustfft::{num_complex::Complex, FftPlanner};
-use std::env;
-use std::fs::File;
-use std::io::Read;
-use std::path::PathBuf;
 
-pub fn get_file() -> (Vec<f32>, u32) {
-    let mut path = PathBuf::from(env::current_dir().unwrap());
-    path.push("src/audio/");
-    path.push("test.mp3");
-
-    let mut mp3_data = Vec::new();
-
-    File::open(&path)
-        .unwrap()
-        .read_to_end(&mut mp3_data)
-        .unwrap();
-
-    let mut mp3_decoder = Mp3Decoder::new(mp3_data.as_slice());
-    let mut samples = Vec::new();
-    let mut sample_rate = 0;
-
-    while let Ok(Frame {
-        data,
-        sample_rate: sr,
-        ..
-    }) = mp3_decoder.next_frame()
-    {
-        sample_rate = sr;
-        for sample in data {
-            let f = sample as f32 / 32768.0; // Normalize to -1.0 to 1.0
-            samples.push(f);
-        }
-    }
-
-    (samples, sample_rate as u32)
-}
 
 pub fn get_max_amplitude_freq(samples: &Vec<f32>, reduced_slice_size: usize) -> f32 {
     let fft = FftPlanner::new().plan_fft_forward(reduced_slice_size);
@@ -65,4 +27,29 @@ pub fn get_max_amplitude_freq(samples: &Vec<f32>, reduced_slice_size: usize) -> 
     }
 
     max_amplitude
+}
+
+use std::env;
+use std::fs::File;
+use std::path::PathBuf;
+use audrey::Reader;
+// use audrey::sample::interpolate::Converter;
+// use audrey::sample::signal::{from_iter, Signal};
+
+
+
+pub fn from_file() -> Option<(Vec<f32>, u32, u32)> {
+    let mut path = PathBuf::from(env::current_dir().unwrap());
+    path.push("src/audio/");
+    path.push("test.flac");
+
+    let file = File::open(&path).unwrap();
+    let mut reader = audrey::Reader::new(file).unwrap();
+    let desc = reader.description();
+    let sample_rate = desc.sample_rate() as u32;
+    let channels = desc.channel_count();
+
+    let samples: Vec<f32> = reader.samples::<f32>().filter_map(Result::ok).collect();
+
+    Some((samples, sample_rate, channels))
 }
