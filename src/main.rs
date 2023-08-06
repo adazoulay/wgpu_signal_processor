@@ -8,41 +8,25 @@ use std::sync::{Arc, Mutex};
 use audio_general::audio::util::from_file;
 
 fn main() {
-    let audio_IO = AudioIO::new();
-    let sample_rate = audio_IO.supported_output_config.sample_rate().0;
-
-    let mut audio_state = AudioState::<[f32;2]>::new(sample_rate);
+    let audio_io = AudioIO::new();
+    let sample_rate = audio_io.supported_output_config.sample_rate().0;
+    
+    let mut audio_state =  AudioState::<[f32;2]>::new(sample_rate);
     
     let (samples, sample_rate, channels) = from_file().unwrap();
-    let audio_clip = match channels {
-        1 => AudioClipEnum::Mono(AudioClip::<[f32; 1]>::new(samples, sample_rate)),
-        2 => AudioClipEnum::Stereo(AudioClip::<[f32; 2]>::new(samples, sample_rate)),
-        _ => panic!("Invalid number of channels"),
-    };
+    let audio_clip = AudioClipEnum::from_samples(samples, sample_rate, channels);
+    audio_state.add_clip::<[f32;2]>(audio_clip);
     
-    if let AudioClipEnum::Stereo(clip) = audio_clip {
-        audio_state.add_clip::<[f32;2]>(clip);
-    }
     
-    let (samples, sample_rate, channels) = audio_IO.record().unwrap();
-    let audio_clip = match channels {
-        1 => AudioClipEnum::Mono(AudioClip::<[f32; 1]>::new(samples, sample_rate)),
-        2 => AudioClipEnum::Stereo(AudioClip::<[f32; 2]>::new(samples, sample_rate)),
-        _ => panic!("Invalid number of channels"),
-    };
-    
-    if let AudioClipEnum::Mono(clip) = audio_clip {
-        let clip = clip.to_stereo();
-        audio_state.add_clip::<[f32;2]>(clip);
-    }
-
+    let (samples, sample_rate, channels) = audio_io.record().unwrap();
+    let audio_clip = AudioClipEnum::from_samples(samples, sample_rate, channels);    
+    audio_state.add_clip::<[f32;2]>(audio_clip);
     
 
-
-    match audio_IO.supported_output_config.sample_format() {
+    match audio_io.supported_output_config.sample_format() {
         cpal::SampleFormat::F32 => run::<f32>(
-            audio_IO.output_device,
-            audio_IO.supported_output_config.into(),
+            audio_io.output_device,
+            audio_io.supported_output_config.into(),
             audio_state,
         ),
         _ => unimplemented!(),
