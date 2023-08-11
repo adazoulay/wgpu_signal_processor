@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 cfg-if = "1"
 
+
 wgpu = "0.16.1"
 winit = "0.28.6"
 env_logger = "0.10"
@@ -26,3 +27,21 @@ rtrb = "0.2.3"
 cpal = "0.15.2"
 dasp = {version = "0.11.0", features = ["all"]}
 dasp_signal = "0.11.0"
+
+# [target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.6"
+console_log = "1.0.0"
+# wgpu = { version = "0.16.0", features = ["webgl"]}
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4.30"
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Window",
+    "Element",
+]}
+
+[patch.crates-io]
+libc = { git = "https://github.com/wasix-org/libc", branch = "master" }
+
+[lib]
+crate-type = ["cdylib", "rlib"]

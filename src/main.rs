@@ -1,4 +1,4 @@
-use audio_general::audio::audio_clip::{AudioClip, AudioClipEnum};
+use audio_general::audio::audio_clip::{ AudioClipEnum};
 use audio_general::audio::audio_state::AudioState;
 use audio_general::audio::io::AudioIO;
 use audio_general::wgpu::visualizer::run_visualizer;
@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 
 use audio_general::audio::util::from_file;
 
-fn main() {
+
+
+pub fn main() {
     let audio_io = AudioIO::new();
     let sample_rate = audio_io.supported_output_config.sample_rate().0;
     
@@ -33,7 +35,8 @@ fn main() {
     }
 }
 
-fn run<T: cpal::Sample>(
+
+pub fn run<T: cpal::Sample>(
     device: cpal::Device,
     stream_config: cpal::StreamConfig,
     audio_state: AudioState<[f32;2]>,
@@ -74,7 +77,8 @@ fn run<T: cpal::Sample>(
         Some(std::time::Duration::from_secs(1)),
     )
     .unwrap();
-stream.play().unwrap();
+
+    stream.play().unwrap();
 
     pollster::block_on(run_visualizer(audio_metadata, rx));
 

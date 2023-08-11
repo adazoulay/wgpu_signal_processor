@@ -32,10 +32,6 @@ pub fn get_max_amplitude_freq(samples: &Vec<f32>, reduced_slice_size: usize) -> 
 use std::env;
 use std::fs::File;
 use std::path::PathBuf;
-use audrey::Reader;
-// use audrey::sample::interpolate::Converter;
-// use audrey::sample::signal::{from_iter, Signal};
-
 
 
 pub fn from_file() -> Option<(Vec<f32>, u32, u32)> {

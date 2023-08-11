@@ -171,6 +171,8 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "cgmath",
+ "console_error_panic_hook",
+ "console_log",
  "cpal",
  "dasp",
  "dasp_signal",
@@ -181,6 +183,9 @@ dependencies = [
  "rodio",
  "rtrb",
  "rustfft",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "wgpu",
  "winit",
 ]
@@ -456,6 +461,26 @@ checksum = "35ed6e9d84f0b51a7f52daf1c7d71dd136fd7a3f41a8462b8cdb8c78d920fad4"
 dependencies = [
  "bytes",
  "memchr 2.5.0",
+]
+
+[[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "console_log"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be8aed40e4edbf4d3b4431ab260b63fdc40f5780a4766824329ea0f1eefe3c0f"
+dependencies = [
+ "log",
+ "web-sys",
 ]
 
 [[package]]
@@ -2667,3 +2692,8 @@ name = "xml-rs"
 version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52839dc911083a8ef63efa4d039d1f58b5e409f923e44c80828f206f66e5541c"
+
+[[patch.unused]]
+name = "libc"
+version = "0.2.139"
+source = "git+https://github.com/wasix-org/libc?branch=master#4c0c6c29378b68c4af7f0b1384a111ba3081b6bf"

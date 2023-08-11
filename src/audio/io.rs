@@ -1,12 +1,10 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 
-use super::audio_clip::AudioClip;
 use std::{
     fmt::Debug,
     sync::{Arc, Mutex},
 };
 
-use dasp::{Frame, Sample};
 
 pub struct AudioIO {
     _host: cpal::Host,

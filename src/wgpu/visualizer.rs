@@ -275,12 +275,31 @@ impl State {
     }
 }
 
+
 pub async fn run_visualizer(
     audio_state: AudioStateMetatada,
     rx: std::sync::mpsc::Receiver<Vec<f32>>,
 ) {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use winit::dpi::PhysicalSize;
+        window.set_inner_size(PhysicalSize::new(450, 400));
+
+        use winit::platform::web::WindowExtWebSys;
+        web_sys::window()
+            .and_then(|win| win.document())
+            .and_then(|doc| {
+                let dst = doc.get_element_by_id("wasm-example")?;
+                let canvas = web_sys::Element::from(window.canvas());
+                dst.append_child(&canvas).ok()?;
+                Some(())
+            })
+            .expect("Couldn't append canvas to document body.");
+    }
+
 
     // ! STATE SETUP
     let mut state = State::new(window, &audio_state).await;
