@@ -1,11 +1,8 @@
-use dasp::Frame;
 use crate::audio::audio_clip::{AudioClip, AudioClipEnum, AudioClipTrait};
-
-
-
+use dasp::Frame;
 
 #[derive(Clone, Debug)]
-pub struct AudioState<F> 
+pub struct AudioState<F>
 where
     F: Frame<Sample = f32> + Copy,
 {
@@ -16,13 +13,11 @@ where
     pub audio_metadata: AudioStateMetatada,
 }
 
-
-impl<F> AudioState<F> 
+impl<F> AudioState<F>
 where
     F: Frame<Sample = f32> + Copy,
 {
     pub fn new(sample_rate: u32) -> Self {
-
         let audio_metadata = AudioStateMetatada::new(sample_rate as f32);
 
         Self {
@@ -33,7 +28,7 @@ where
             audio_metadata,
         }
     }
-   
+
     pub fn get_sample(&mut self) -> Option<F> {
         self.index += 1;
         if self.index >= self.samples.len() {
@@ -45,22 +40,23 @@ where
 
     pub fn add_clip_to_samples(&mut self, clip: AudioClip<F>) {
         let s = clip.get_start_time_frame() as usize;
-        let l =  clip.get_length() as usize;
+        let l = clip.get_length() as usize;
 
         if s + l > self.samples.len() {
             let p = s + l;
             self.samples.resize(p, F::EQUILIBRIUM);
         }
-        
+
         let clip_samples = clip.get_frames();
         for i in s..(s + clip.get_length() as usize) {
             self.samples[i] = (self.samples[i].add_amp(clip_samples[i - s])).into();
         }
 
         self.audio_clips.push(clip);
+        self.update_metadata();
     }
-    
-    pub fn set_metadata(&mut self) {
+
+    pub fn update_metadata(&mut self) {
         self.audio_metadata.update_metadata(self.samples.len());
     }
 
@@ -69,27 +65,26 @@ where
     }
 }
 
-impl AudioState<[f32;1]> {
+impl AudioState<[f32; 1]> {
     pub fn add_clip(&mut self, clip: AudioClipEnum) {
         let mut clip = match clip {
             AudioClipEnum::Mono(clip) => clip,
-            AudioClipEnum::Stereo(clip) => clip.to_mono()
+            AudioClipEnum::Stereo(clip) => clip.to_mono(),
         };
 
         if self.sample_rate != clip.get_sample_rate() {
             clip = clip.resample(self.sample_rate);
         }
-        
- 
+
         self.add_clip_to_samples(clip);
     }
 }
 
-impl AudioState<[f32;2]> {
+impl AudioState<[f32; 2]> {
     pub fn add_clip<F>(&mut self, clip: AudioClipEnum) {
         let mut clip = match clip {
             AudioClipEnum::Mono(clip) => clip.to_stereo(),
-            AudioClipEnum::Stereo(clip) => clip
+            AudioClipEnum::Stereo(clip) => clip,
         };
 
         if self.sample_rate != clip.get_sample_rate() {
@@ -102,11 +97,9 @@ impl AudioState<[f32;2]> {
 
 // Metadata and Type
 
-
 pub fn compute_sice_size(sample_rate: f32, frame_rate: f32) -> usize {
     return (sample_rate / frame_rate) as usize;
 }
-
 
 #[derive(Clone, Debug)]
 pub enum SpectrumType {
@@ -121,7 +114,6 @@ pub struct AudioStateMetatada {
     pub slice_size: usize,
     pub max_amplitude: f32,
 }
-
 
 impl AudioStateMetatada {
     pub fn new(sample_rate: f32) -> Self {
@@ -149,11 +141,10 @@ impl AudioStateMetatada {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_add_clip_to_samples_mono_start_2() {
         let sample_rate = 44100;
@@ -162,7 +153,10 @@ mod tests {
         let mut clip = AudioClip::<[f32; 1]>::new(vec![99.0, 99.0, 99.0, 99.0], sample_rate);
         clip.set_start_time_frame(2);
         audio_state.add_clip_to_samples(clip);
-        assert_eq!(audio_state.samples, vec![[0.0], [1.0], [101.0], [102.0], [103.0], [99.0]]);
+        assert_eq!(
+            audio_state.samples,
+            vec![[0.0], [1.0], [101.0], [102.0], [103.0], [99.0]]
+        );
     }
 
     #[test]
@@ -173,7 +167,10 @@ mod tests {
         let mut clip = AudioClip::<[f32; 1]>::new(vec![99.0, 99.0, 99.0, 99.0], sample_rate);
         clip.set_start_time_frame(0);
         audio_state.add_clip_to_samples(clip);
-        assert_eq!(audio_state.samples, vec![[99.0], [100.0], [101.0], [102.0], [4.0]]);
+        assert_eq!(
+            audio_state.samples,
+            vec![[99.0], [100.0], [101.0], [102.0], [4.0]]
+        );
     }
 
     #[test]
@@ -184,7 +181,24 @@ mod tests {
         let mut clip = AudioClip::<[f32; 1]>::new(vec![99.0, 99.0, 99.0, 99.0], sample_rate);
         clip.set_start_time_frame(9);
         audio_state.add_clip_to_samples(clip);
-        assert_eq!(audio_state.samples, vec![[0.0], [1.0], [2.0], [3.0], [4.0], [0.0], [0.0], [0.0], [0.0], [99.0], [99.0], [99.0], [99.0]]);
+        assert_eq!(
+            audio_state.samples,
+            vec![
+                [0.0],
+                [1.0],
+                [2.0],
+                [3.0],
+                [4.0],
+                [0.0],
+                [0.0],
+                [0.0],
+                [0.0],
+                [99.0],
+                [99.0],
+                [99.0],
+                [99.0]
+            ]
+        );
     }
 
     #[test]
@@ -196,7 +210,17 @@ mod tests {
         let mut clip = AudioClip::<[f32; 2]>::new(v, sample_rate);
         clip.set_start_time_frame(2);
         audio_state.add_clip_to_samples(clip);
-        assert_eq!(audio_state.samples, vec![[0.0, 0.0], [1.0, 1.0], [101.0, 101.0], [102.0, 102.0], [103.0, 103.0], [99.0, 99.0]]);
+        assert_eq!(
+            audio_state.samples,
+            vec![
+                [0.0, 0.0],
+                [1.0, 1.0],
+                [101.0, 101.0],
+                [102.0, 102.0],
+                [103.0, 103.0],
+                [99.0, 99.0]
+            ]
+        );
     }
 
     #[test]
@@ -208,7 +232,16 @@ mod tests {
         let mut clip = AudioClip::<[f32; 2]>::new(v, sample_rate);
         clip.set_start_time_frame(0);
         audio_state.add_clip_to_samples(clip);
-        assert_eq!(audio_state.samples, vec![[99.0, 99.0], [100.0, 100.0], [101.0, 101.0], [102.0, 102.0], [4.0, 4.0]]);
+        assert_eq!(
+            audio_state.samples,
+            vec![
+                [99.0, 99.0],
+                [100.0, 100.0],
+                [101.0, 101.0],
+                [102.0, 102.0],
+                [4.0, 4.0]
+            ]
+        );
     }
 
     #[test]
@@ -220,6 +253,23 @@ mod tests {
         let mut clip = AudioClip::<[f32; 2]>::new(v, sample_rate);
         clip.set_start_time_frame(9);
         audio_state.add_clip_to_samples(clip);
-        assert_eq!(audio_state.samples, vec![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [99.0, 99.0], [99.0, 99.0], [99.0, 99.0], [99.0, 99.0]]);
+        assert_eq!(
+            audio_state.samples,
+            vec![
+                [0.0, 0.0],
+                [1.0, 1.0],
+                [2.0, 2.0],
+                [3.0, 3.0],
+                [4.0, 4.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [99.0, 99.0],
+                [99.0, 99.0],
+                [99.0, 99.0],
+                [99.0, 99.0]
+            ]
+        );
     }
 }

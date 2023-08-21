@@ -1,8 +1,71 @@
-Once visualization kinks are solved:
 
 
-Basic filters: highpass, lowpass, etc..
-    - Apply when build_output_stream data_callback
+
+Note: For EQ curve drawing, look at interpolation 
 
 
-For EQ curve drawing, look at interpolation 
+Incorporating AudioGraph:
+Your AudioGraph would be a network of interconnected AudioNodes. Each AudioNode might represent an audio source, a series of effects, and an output. The AudioGraph would be responsible for managing the connections and the flow of audio data through these nodes.
+
+rust
+Copy code
+struct AudioGraph {
+    nodes: Vec<AudioNode>,
+    edges: Vec<(usize, usize)>, // Connects node indices, implying data flow direction
+    // ... other methods to add nodes, connect nodes, process, etc.
+}
+Your AudioProcessor can then utilize this AudioGraph to determine how audio data should flow and be processed.
+
+UML Diagram:
+Below is a textual representation of a UML class diagram for your system. Note that this is not actual UML syntax but rather a description of the relationships:
+
+less
+Copy code
+AudioGraph:
+    - nodes: AudioNode[]
+    - edges: tuple[]
+    + add_node(node: AudioNode): void
+    + connect_nodes(node1: AudioNode, node2: AudioNode): void
+    + process(clip: AudioClip): void
+
+AudioNode:
+    - source: AudioSource (can be InputSource, FileSource, etc.)
+    - effect_chain: AudioEffectChain
+    - output: OutputSource
+
+AudioSource (interface):
+    + get_audio(): AudioClip
+
+InputSource (implements AudioSource):
+    - device: Device
+    - supported_config: SupportedStreamConfig
+    + record(): AudioClip
+
+OutputSource:
+    - device: Device
+    - supported_config: SupportedStreamConfig
+    + play(clip: AudioClip): void
+
+AudioEffectChain:
+    - effects: AudioEffect[]
+    + add_effect(effect: AudioEffect): void
+    + process(clip: AudioClip): void
+
+AudioEffect (interface):
+    + apply(clip: AudioClip): void
+
+VariousEffects (e.g., EQ, Shift, etc., implements AudioEffect):
+    // Specific fields and methods for each effect
+
+AudioClip:
+    - samples: float[]
+    - sample_rate: int
+    + get_sample(): float
+    + add_clip(clip: AudioClip): void
+    // ... other methods
+
+AudioProcessor:
+    - graph: AudioGraph
+    + add_node_to_graph(node: AudioNode): void
+    + connect_nodes_in_graph(node1: AudioNode, node2: AudioNode): void
+    + process(clip: AudioClip): void

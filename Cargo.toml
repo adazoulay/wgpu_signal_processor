@@ -3,45 +3,18 @@ name = "audio_general"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 cfg-if = "1"
 
-
-wgpu = "0.16.1"
-winit = "0.28.6"
-env_logger = "0.10"
-log = "0.4"
-pollster = "0.3"
-bytemuck = { version = "1.12", features = [ "derive" ] }
-anyhow = "1.0"
-cgmath = "0.18"
-
-rodio = "0.17.1"
-flac = "0.5.0"
-
-audrey = "0.3.0"
-rustfft = "6.1.0"
-rtrb = "0.2.3"
 cpal = "0.15.2"
 dasp = {version = "0.11.0", features = ["all"]}
-dasp_signal = "0.11.0"
+audrey = "0.3.0"
+rustfft = "6.1.0"
 
-# [target.'cfg(target_arch = "wasm32")'.dependencies]
-console_error_panic_hook = "0.1.6"
-console_log = "1.0.0"
-# wgpu = { version = "0.16.0", features = ["webgl"]}
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4.30"
-web-sys = { version = "0.3", features = [
-    "Document",
-    "Window",
-    "Element",
-]}
+petgraph = "0.6.3"
 
-[patch.crates-io]
-libc = { git = "https://github.com/wasix-org/libc", branch = "master" }
-
-[lib]
-crate-type = ["cdylib", "rlib"]
+wgpu = "0.17.0"
+winit = "0.28.6"
+pollster = "0.3"
+bytemuck = { version = "1.12", features = [ "derive" ] }
+log = "0.4"
