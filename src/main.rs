@@ -1,13 +1,13 @@
-use audio_general::audio::audio_clip::AudioClipEnum;
+use audio_general::audio::audio_graph::AudioGraphEdge;
+use audio_general::audio::audio_processor::AudioProcessor;
 use audio_general::audio::audio_state::AudioState;
 use audio_general::audio::io::AudioIO;
+use audio_general::audio::{audio_clip::AudioClipEnum, audio_processor};
 use audio_general::wgpu::visualizer::run_visualizer;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
 
 use audio_general::audio::util::from_file;
-
-use audio_general::audio::audio_processor::{AudioFrame, AudioProcessor};
 
 pub fn main() {
     let audio_io = AudioIO::new();
@@ -15,19 +15,27 @@ pub fn main() {
 
     let mut audio_state = AudioState::<[f32; 2]>::new(sample_rate);
 
+    let mut audio_processor = AudioProcessor::<[f32; 2]>::new();
+
     let (samples, sample_rate, channels) = from_file().unwrap();
     let audio_clip = AudioClipEnum::from_samples(samples, sample_rate, channels);
-    audio_state.add_clip::<[f32; 2]>(audio_clip);
+
+    let n1 = audio_processor.add_node(audio_clip, Some("n1"));
 
     let (samples, sample_rate, channels) = audio_io.record().unwrap();
     let audio_clip = AudioClipEnum::from_samples(samples, sample_rate, channels);
-    audio_state.add_clip::<[f32; 2]>(audio_clip);
+
+    let n2 = audio_processor.add_node(audio_clip, Some("n1"));
+
+    audio_processor.connect(n1, None, AudioGraphEdge::Add);
+    audio_processor.connect(n2, None, AudioGraphEdge::Add);
 
     match audio_io.supported_output_config.sample_format() {
         cpal::SampleFormat::F32 => run::<f32>(
             audio_io.output_device,
             audio_io.supported_output_config.into(),
             audio_state,
+            audio_processor,
         ),
         _ => unimplemented!(),
     }
@@ -37,9 +45,11 @@ pub fn run<T: cpal::Sample>(
     device: cpal::Device,
     stream_config: cpal::StreamConfig,
     audio_state: AudioState<[f32; 2]>,
+    audio_processor: AudioProcessor<[f32; 2]>,
 ) {
     let audio_metadata = audio_state.get_metadata();
     let audio_state = Arc::new(Mutex::new(audio_state));
+    let audio_processor = Arc::new(Mutex::new(audio_processor));
 
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -47,11 +57,12 @@ pub fn run<T: cpal::Sample>(
         .build_output_stream(
             &stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                let audio_state = Arc::clone(&audio_state);
-                let mut audio_state = audio_state.lock().unwrap();
-                let mut data_index = 0;
+                let audio_processor = Arc::clone(&audio_processor);
+                let mut audio_processor = audio_processor.lock().unwrap();
+                let mut data_index: usize = 0;
                 while data_index < data.len() {
-                    if let Some(frame) = audio_state.get_sample() {
+                    if let Some(frame) = audio_processor.get_root_sample() {
+                        println!("{:?}", frame);
                         for sample in frame.iter() {
                             if data_index < data.len() {
                                 data[data_index] = *sample;

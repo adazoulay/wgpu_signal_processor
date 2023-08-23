@@ -47,7 +47,7 @@ where
             self.samples.resize(p, F::EQUILIBRIUM);
         }
 
-        let clip_samples = clip.get_frames();
+        let clip_samples = clip.get_frames_ref();
         for i in s..(s + clip.get_length() as usize) {
             self.samples[i] = (self.samples[i].add_amp(clip_samples[i - s])).into();
         }
@@ -140,6 +140,8 @@ impl AudioStateMetatada {
         self.size = new_size;
     }
 }
+
+// ! -------------- TESTS --------------
 
 #[cfg(test)]
 mod tests {

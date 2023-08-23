@@ -3,48 +3,30 @@ use dasp::frame::{Mono, Stereo};
 use dasp::signal;
 use dasp::{interpolate::linear::Linear, Signal};
 
-// #[derive(Clone, Debug)]
-// pub enum AudioClipEnum {
-//     Mono(AudioClip<Mono<f32>>),
-//     Stereo(AudioClip<Stereo<f32>>),
-// }
-
-// impl AudioClipEnum {
-//     pub fn from_samples(samples: Vec<f32>, sample_rate: u32, channels: u32) -> Self {
-//         match channels {
-//             1 => Self::Mono(AudioClip::<Mono<f32>>::new(samples, sample_rate)),
-//             2 => Self::Stereo(AudioClip::<Stereo<f32>>::new(samples, sample_rate)),
-//             _ => panic!("Invalid number of channels"),
-//         }
-//     }
-
-//     pub fn default() -> Self {
-//         let sample_rate = 44100;
-//         let samples = Vec::<f32>::with_capacity(sample_rate * 5);
-//         let clip = AudioClip::<Stereo<f32>>::new(samples, sample_rate as u32);
-//         AudioClipEnum::Stereo(clip)
-//     }
-// }
-
 pub trait AudioClipTrait {
     type S: dasp::Frame;
-    fn get_frames(&self) -> &[Self::S];
-    fn get_mut_frames(&mut self) -> &mut [Self::S];
-    fn get_frame(&self, idx: usize) -> Self::S;
+
+    fn default() -> Self;
+    // Getters
+    fn get_frames_ref(&self) -> &[Self::S];
+    fn get_frames_mut(&mut self) -> &mut [Self::S];
+    fn get_frame(&self, idx: usize) -> Option<Self::S>;
     fn get_sample_rate(&self) -> u32;
     fn get_start_time_frame(&self) -> u32;
+    fn get_length(&self) -> usize;
+    // Setters
+    fn set_frame(&mut self, idx: usize, val: Self::S);
     fn set_start_time_frame(&mut self, sample_idx: u32);
-    fn get_length(&self) -> u32;
     fn resample(&self, sample_rate: u32) -> Self
     where
         Self: Sized;
+    fn resize_frames(&mut self, new_size: usize, value: Self::S);
 }
 
 #[derive(Clone, Debug)]
 pub struct AudioClip<F> {
     frames: Vec<F>,
     sample_rate: u32,
-    length: u32,
     start_time_frame: u32,
 }
 
@@ -54,32 +36,59 @@ where
 {
     type S = F;
 
-    fn get_frames(&self) -> &[Self::S] {
+    // Initializer
+    fn default() -> Self {
+        let sample_rate = 44100;
+        let length = sample_rate * 5;
+        let frames = vec![F::EQUILIBRIUM; length];
+
+        Self {
+            frames,
+            sample_rate: sample_rate as u32,
+            start_time_frame: 0,
+        }
+    }
+
+    // Getters
+    fn get_frames_ref(&self) -> &[Self::S] {
         &self.frames
     }
 
-    fn get_mut_frames(&mut self) -> &mut [Self::S] {
+    fn get_frames_mut(&mut self) -> &mut [Self::S] {
         &mut self.frames
+    }
+
+    fn get_frame(&self, idx: usize) -> Option<Self::S> {
+        if idx < self.get_length() {
+            Some(self.frames[idx])
+        } else {
+            None
+        }
     }
 
     fn get_sample_rate(&self) -> u32 {
         self.sample_rate
     }
 
-    //TODO  Make this an option, check length
-    fn get_frame(&self, idx: usize) -> Self::S {
-        self.frames[idx]
-    }
-
     fn get_start_time_frame(&self) -> u32 {
         self.start_time_frame
     }
+
+    fn get_length(&self) -> usize {
+        self.frames.len()
+    }
+
+    // Setters
+    fn set_frame(&mut self, idx: usize, val: Self::S) {
+        self.frames[idx] = val;
+    }
+
     fn set_start_time_frame(&mut self, sample_idx: u32) {
         self.start_time_frame = sample_idx;
     }
 
-    fn get_length(&self) -> u32 {
-        self.length
+    fn resize_frames(&mut self, new_size: usize, value: Self::S) {
+        self.frames.resize(new_size, value);
     }
 
     fn resample(&self, sample_rate: u32) -> Self {
@@ -96,13 +105,10 @@ where
             .take(self.frames.len() * (sample_rate as usize) / self.sample_rate as usize)
             .collect();
 
-        let length = frames.len() as u32;
-
         Self {
             frames,
             sample_rate,
-            length,
-            start_time_frame: 0,
+            start_time_frame: self.start_time_frame,
         }
     }
 }
@@ -110,24 +116,19 @@ where
 impl AudioClip<[f32; 1]> {
     pub fn new(samples: Vec<f32>, sample_rate: u32) -> Self {
         let frames: Vec<[f32; 1]> = samples.into_iter().map(|sample| [sample]).collect();
-        let length = frames.len() as u32;
         Self {
             frames,
             sample_rate,
-            length,
             start_time_frame: 0,
         }
     }
 
     pub fn to_stereo(&self) -> AudioClip<[f32; 2]> {
-        // [f32; 2]: Stereo
         let stereo_frames: Vec<[f32; 2]> =
             self.frames.iter().map(|mono| [mono[0], mono[0]]).collect();
-        let length = stereo_frames.len() as u32;
         AudioClip {
             frames: stereo_frames,
             sample_rate: self.sample_rate,
-            length,
             start_time_frame: 0,
         }
     }
@@ -139,12 +140,10 @@ impl AudioClip<[f32; 2]> {
             .chunks_exact(2)
             .map(|chunk| [chunk[0], chunk[1]])
             .collect();
-        let length = frames.len() as u32;
 
         Self {
             frames,
             sample_rate,
-            length,
             start_time_frame: 0,
         }
     }
@@ -155,14 +154,34 @@ impl AudioClip<[f32; 2]> {
             .iter()
             .map(|stereo| [(stereo[0] + stereo[1]) / 2.0])
             .collect();
-        let length = mono_frames.len() as u32;
 
         AudioClip {
             frames: mono_frames,
             sample_rate: self.sample_rate,
-            length,
             start_time_frame: 0,
         }
+    }
+}
+
+pub enum AudioClipEnum {
+    Mono(AudioClip<Mono<f32>>),
+    Stereo(AudioClip<Stereo<f32>>),
+}
+
+impl AudioClipEnum {
+    pub fn from_samples(samples: Vec<f32>, sample_rate: u32, channels: u32) -> Self {
+        match channels {
+            1 => Self::Mono(AudioClip::<Mono<f32>>::new(samples, sample_rate)),
+            2 => Self::Stereo(AudioClip::<Stereo<f32>>::new(samples, sample_rate)),
+            _ => panic!("Invalid number of channels"),
+        }
+    }
+
+    pub fn default() -> Self {
+        let sample_rate = 44100;
+        let samples = Vec::<f32>::with_capacity(sample_rate * 5);
+        let clip = AudioClip::<Stereo<f32>>::new(samples, sample_rate as u32);
+        AudioClipEnum::Stereo(clip)
     }
 }
 
@@ -180,7 +199,6 @@ mod tests {
             frames: input_samples,
             sample_rate: 44100,
             start_time_frame: 0,
-            length: 0,
         };
 
         let output_clip = input_clip.resample(88200);
@@ -195,7 +213,6 @@ mod tests {
             frames: input_samples,
             sample_rate: 44100,
             start_time_frame: 0,
-            length: 0,
         };
 
         let output_clip = input_clip.resample(88200);
@@ -210,9 +227,8 @@ mod tests {
             frames: input_samples,
             sample_rate: 44100,
             start_time_frame: 0,
-            length: 0,
         };
-        let samples = input_clip.get_frames();
+        let samples = input_clip.get_frames_ref();
         assert_eq!(samples, vec![[0.0; 1]; 1000]);
     }
 
@@ -223,9 +239,8 @@ mod tests {
             frames: input_samples,
             sample_rate: 44100,
             start_time_frame: 0,
-            length: 0,
         };
-        let samples = input_clip.get_frames();
+        let samples = input_clip.get_frames_ref();
         assert_eq!(samples, vec![[0.0, 0.0]; 1000]);
     }
 
@@ -236,9 +251,8 @@ mod tests {
             frames: input_samples,
             sample_rate: 44100,
             start_time_frame: 0,
-            length: 0,
         };
-        let sample = input_clip.get_frame(2);
+        let sample = input_clip.get_frame(2).unwrap();
         assert_eq!(sample, [2.0]);
     }
 
@@ -250,9 +264,8 @@ mod tests {
             frames: input_samples,
             sample_rate: 44100,
             start_time_frame: 0,
-            length: 0,
         };
-        let sample = input_clip.get_frame(2);
+        let sample = input_clip.get_frame(2).unwrap();
         assert_eq!(sample, [2.0, 2.0]);
     }
 }

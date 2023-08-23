@@ -275,7 +275,6 @@ impl State {
     }
 }
 
-
 pub async fn run_visualizer(
     audio_state: AudioStateMetatada,
     rx: std::sync::mpsc::Receiver<Vec<f32>>,
@@ -299,7 +298,6 @@ pub async fn run_visualizer(
             })
             .expect("Couldn't append canvas to document body.");
     }
-
 
     // ! STATE SETUP
     let mut state = State::new(window, &audio_state).await;
