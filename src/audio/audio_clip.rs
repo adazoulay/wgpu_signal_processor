@@ -6,28 +6,34 @@ use dasp::{interpolate::linear::Linear, Signal};
 pub trait AudioClipTrait {
     type S: dasp::Frame;
 
+    // Constructors
     fn default() -> Self;
+    fn with_capacity(capacity: usize) -> Self;
+
     // Getters
     fn get_frames_ref(&self) -> &[Self::S];
     fn get_frames_mut(&mut self) -> &mut [Self::S];
     fn get_frame(&self, idx: usize) -> Option<Self::S>;
     fn get_sample_rate(&self) -> u32;
-    fn get_start_time_frame(&self) -> u32;
+    fn get_start_time_frame(&self) -> usize;
     fn get_length(&self) -> usize;
+
     // Setters
     fn set_frame(&mut self, idx: usize, val: Self::S);
-    fn set_start_time_frame(&mut self, sample_idx: u32);
+    fn set_start_time_frame(&mut self, sample_idx: usize);
     fn resample(&self, sample_rate: u32) -> Self
     where
         Self: Sized;
     fn resize_frames(&mut self, new_size: usize, value: Self::S);
+    fn add_padding_left(&mut self, padding_frames: usize);
+    fn reset_clip(&mut self);
 }
 
 #[derive(Clone, Debug)]
 pub struct AudioClip<F> {
     frames: Vec<F>,
     sample_rate: u32,
-    start_time_frame: u32,
+    start_time_frame: usize,
 }
 
 impl<F> AudioClipTrait for AudioClip<F>
@@ -41,6 +47,17 @@ where
         let sample_rate = 44100;
         let length = sample_rate * 5;
         let frames = vec![F::EQUILIBRIUM; length];
+
+        Self {
+            frames,
+            sample_rate: sample_rate as u32,
+            start_time_frame: 0,
+        }
+    }
+
+    fn with_capacity(capacity: usize) -> Self {
+        let sample_rate = 44100;
+        let frames = vec![F::EQUILIBRIUM; capacity];
 
         Self {
             frames,
@@ -70,7 +87,7 @@ where
         self.sample_rate
     }
 
-    fn get_start_time_frame(&self) -> u32 {
+    fn get_start_time_frame(&self) -> usize {
         self.start_time_frame
     }
 
@@ -79,16 +96,26 @@ where
     }
 
     // Setters
+    // Todo Should return Results
     fn set_frame(&mut self, idx: usize, val: Self::S) {
         self.frames[idx] = val;
     }
 
-    fn set_start_time_frame(&mut self, sample_idx: u32) {
+    fn set_start_time_frame(&mut self, sample_idx: usize) {
         self.start_time_frame = sample_idx;
     }
 
     fn resize_frames(&mut self, new_size: usize, value: Self::S) {
         self.frames.resize(new_size, value);
+    }
+
+    fn add_padding_left(&mut self, padding_frames: usize) {
+        if padding_frames <= 0 {
+            return;
+        }
+        let mut padding = vec![F::EQUILIBRIUM; padding_frames];
+        padding.append(&mut self.frames);
+        self.frames = padding;
     }
 
     fn resample(&self, sample_rate: u32) -> Self {
@@ -110,6 +137,12 @@ where
             sample_rate,
             start_time_frame: self.start_time_frame,
         }
+    }
+
+    fn reset_clip(&mut self) {
+        let length = self.get_length();
+        let frames = vec![F::EQUILIBRIUM; length];
+        self.frames = frames;
     }
 }
 

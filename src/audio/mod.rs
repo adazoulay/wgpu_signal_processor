@@ -1,4 +1,5 @@
 pub mod audio_clip;
+pub mod audio_edge;
 pub mod audio_effects;
 pub mod audio_graph;
 pub mod audio_node;

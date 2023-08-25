@@ -1,8 +1,8 @@
-use audio_general::audio::audio_graph::AudioGraphEdge;
+use audio_general::audio::audio_clip::AudioClipEnum;
+use audio_general::audio::audio_edge::{AddOperation, AudioGraphEdge};
 use audio_general::audio::audio_processor::AudioProcessor;
 use audio_general::audio::audio_state::AudioState;
 use audio_general::audio::io::AudioIO;
-use audio_general::audio::{audio_clip::AudioClipEnum, audio_processor};
 use audio_general::wgpu::visualizer::run_visualizer;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
@@ -13,7 +13,7 @@ pub fn main() {
     let audio_io = AudioIO::new();
     let sample_rate = audio_io.supported_output_config.sample_rate().0;
 
-    let mut audio_state = AudioState::<[f32; 2]>::new(sample_rate);
+    let audio_state = AudioState::<[f32; 2]>::new(sample_rate);
 
     let mut audio_processor = AudioProcessor::<[f32; 2]>::new();
 
@@ -27,8 +27,11 @@ pub fn main() {
 
     let n2 = audio_processor.add_node(audio_clip, Some("n1"));
 
-    audio_processor.connect(n1, None, AudioGraphEdge::Add);
-    audio_processor.connect(n2, None, AudioGraphEdge::Add);
+    let add_edge = AudioGraphEdge::new(AddOperation, "AddOp");
+    audio_processor.connect(n1, None, add_edge);
+
+    let add_edge = AudioGraphEdge::new(AddOperation, "AddOp");
+    audio_processor.connect(n2, None, add_edge);
 
     match audio_io.supported_output_config.sample_format() {
         cpal::SampleFormat::F32 => run::<f32>(

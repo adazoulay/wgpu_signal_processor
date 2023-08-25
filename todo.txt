@@ -69,3 +69,57 @@ AudioProcessor:
     + add_node_to_graph(node: AudioNode): void
     + connect_nodes_in_graph(node1: AudioNode, node2: AudioNode): void
     + process(clip: AudioClip): void
+
+
+!!! FIX BOUNDS METHOD
+
+You've correctly identified the issue. The resize_clips method tries to lock the clip again, which is already locked in the prepare_child_for_operation method via the child_clip: MutexGuard<'_, AudioClip<F>> = child_node.get_delta_clip(); line. This causes a deadlock as the Mutex is non-reentrant, meaning once locked, even the same thread cannot lock it again until it's unlocked.
+
+To fix this, you'll need to refactor the code to ensure that you aren't trying to lock the Mutex while it's already locked.
+
+Here's one approach:
+
+Separate locking from action: Refactor get_clip, get_delta_clip, etc., to just return the mutex and let the caller handle the locking.
+rust
+Copy code
+pub fn clip_mutex(&self) -> &Mutex<AudioClip<F>> {
+    &self.clip
+}
+Similarly, for get_delta_clip and get_prev_clip.
+
+Refactor resize_clips: Now, resize_clips should accept the locked MutexGuards instead of trying to lock them itself:
+rust
+Copy code
+pub fn resize_clips(&self, clip: &mut AudioClip<F>, delta_clip: &mut AudioClip<F>, prev_clip: &mut AudioClip<F>, new_size: usize, value: F) {
+    clip.resize_frames(new_size, value);
+    delta_clip.resize_frames(new_size, value);
+    prev_clip.resize_frames(new_size, value);
+}
+Use the refactored methods in prepare_child_for_operation:
+rust
+Copy code
+pub fn prepare_child_for_operation(
+    parent_node: &AudioNode<F>,
+    child_node: &AudioNode<F>,
+) -> (usize, usize) {
+    let mut parent_clip = parent_node.clip_mutex().lock().unwrap();
+    let mut child_clip = child_node.clip_mutex().lock().unwrap();
+    let mut child_delta_clip = child_node.delta_clip_mutex().lock().unwrap();
+    let mut child_prev_clip = child_node.prev_clip_mutex().lock().unwrap();
+
+    // ... rest of your code ...
+
+    if new_child_end > child_clip.get_length() {
+        child_node.resize_clips(&mut *child_clip, &mut *child_delta_clip, &mut *child_prev_clip, new_child_end, F::EQUILIBRIUM);
+        // Note: We use &mut * to dereference the MutexGuard and then get a mutable reference
+    }
+
+    // ... rest of your code ...
+}
+This approach separates the locking concern from the action, giving the caller full control over the locking mechanism and avoiding nested locks.
+
+
+
+
+
+Regenerate

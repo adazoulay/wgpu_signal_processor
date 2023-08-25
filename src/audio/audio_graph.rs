@@ -1,9 +1,10 @@
 // ----  Computation Tree ----
 
 use super::audio_clip::{AudioClip, AudioClipTrait};
+use super::audio_edge::{AddOperation, AudioGraphEdge};
 use super::audio_node::AudioNode;
 use petgraph::dot::Dot;
-use petgraph::stable_graph::{NodeIndex, StableDiGraph};
+use petgraph::stable_graph::{EdgeIndex, NodeIndex, StableDiGraph};
 use petgraph::visit::{Dfs, EdgeRef};
 use std::collections::HashMap;
 use std::fmt;
@@ -22,29 +23,8 @@ impl<F> fmt::Display for AudioGraphNode<F> {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum AudioGraphEdge {
-    Add,       // Add clips to another node
-    Crossfade, // Blend two audio signals with a crossfade.
-    Subtract,  // Subtract one signal from another.
-    Multiply,  // Multiply two audio signals (modulation).
-    Bypass, // Pass the audio through without any alterations. Useful for optionally skipping nodes.
-}
-
-impl fmt::Display for AudioGraphEdge {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AudioGraphEdge::Add => write!(f, "Add"),
-            AudioGraphEdge::Crossfade => write!(f, "Crossfade"),
-            AudioGraphEdge::Subtract => write!(f, "Subtract"),
-            AudioGraphEdge::Multiply => write!(f, "Multiply"),
-            AudioGraphEdge::Bypass => write!(f, "Bypass"),
-        }
-    }
-}
-
 pub struct AudioGraph<F> {
-    pub graph: StableDiGraph<AudioGraphNode<F>, AudioGraphEdge>,
+    pub graph: StableDiGraph<AudioGraphNode<F>, AudioGraphEdge<F>>,
     pub root: NodeIndex,
     node_lookup: HashMap<String, NodeIndex>,
     node_id: i32,
@@ -83,25 +63,31 @@ where
         AudioNode::new(clip, Some(name))
     }
 
-    pub fn connect(&mut self, from: NodeIndex, to: Option<NodeIndex>, op: AudioGraphEdge) {
-        match to {
-            Some(to) => self.graph.add_edge(from, to, op),
-            None => self.graph.add_edge(from, self.root, op),
+    pub fn connect(
+        &mut self,
+        parent: NodeIndex,
+        child: Option<NodeIndex>,
+        edge: AudioGraphEdge<F>,
+    ) -> Result<EdgeIndex, String> {
+        let edge_id = match child {
+            Some(child) => self.graph.add_edge(parent, child, edge),
+            None => self.graph.add_edge(parent, self.root, edge),
         };
+        Ok(edge_id)
     }
 
     pub fn collect_dependents(
         &self,
         node_idx: NodeIndex,
-    ) -> Vec<(NodeIndex, NodeIndex, AudioGraphEdge)> {
+    ) -> Vec<(NodeIndex, NodeIndex, EdgeIndex)> {
         let mut dfs = Dfs::new(&self.graph, node_idx);
         let mut to_compute = Vec::new();
 
         while let Some(node) = dfs.next(&self.graph) {
-            let incoming_info: Vec<(NodeIndex, NodeIndex, AudioGraphEdge)> = self
+            let incoming_info: Vec<(NodeIndex, NodeIndex, EdgeIndex)> = self
                 .graph
                 .edges_directed(node, petgraph::Direction::Outgoing)
-                .map(|edge| (node, edge.target(), edge.weight().clone()))
+                .map(|edge| (node, edge.target(), edge.id()))
                 .collect::<Vec<_>>();
 
             to_compute.extend(incoming_info);
@@ -128,11 +114,11 @@ where
         }
     }
 
-    pub fn get_clip(&self, node_idx: NodeIndex) -> Option<std::sync::MutexGuard<'_, AudioClip<F>>> {
-        match &self.graph[node_idx] {
-            AudioGraphNode::DataNode(node) => Some(node.get_clip()),
-            AudioGraphNode::RootNode(node) => Some(node.get_clip()),
-        }
+    pub fn get_edge_ref(&self, edge_idx: EdgeIndex) -> Option<&AudioGraphEdge<F>> {
+        Some(&self.graph[edge_idx])
+    }
+    pub fn get_edge_mut(&mut self, edge_idx: EdgeIndex) -> Option<&AudioGraphEdge<F>> {
+        Some(&mut self.graph[edge_idx])
     }
 
     pub fn print_graph(&self) {
@@ -219,20 +205,25 @@ mod tests {
         let node2_id = graph.get_node_id("node2").unwrap();
         let node3_id = graph.get_node_id("node3").unwrap();
 
-        graph.connect(node1_id, Some(node2_id), AudioGraphEdge::Add);
-        graph.connect(node2_id, Some(node3_id), AudioGraphEdge::Crossfade);
-        graph.connect(node3_id, None, AudioGraphEdge::Subtract);
+        let add_edge = AudioGraphEdge::new(AddOperation, "AddOp");
+        let edge1 = graph.connect(node1_id, Some(node2_id), add_edge).unwrap();
+
+        let add_edge = AudioGraphEdge::new(AddOperation, "AddOp");
+        let edge_2 = graph.connect(node2_id, Some(node3_id), add_edge).unwrap();
+
+        let add_edge = AudioGraphEdge::new(AddOperation, "AddOp");
+        let edge_3 = graph.connect(node3_id, None, add_edge).unwrap();
 
         graph.print_graph();
 
         let path = graph.collect_dependents(node1_id);
-        println!("Collected path: {:?}", path);
+        // println!("Collected path: {:?}", path);
 
         assert_eq!(path.len(), 3);
 
-        assert_eq!(path[0], (node1_id, node2_id, AudioGraphEdge::Add));
-        assert_eq!(path[1], (node2_id, node3_id, AudioGraphEdge::Crossfade));
-        assert_eq!(path[2], (node3_id, graph.root, AudioGraphEdge::Subtract));
+        assert_eq!(path[0], (node1_id, node2_id, edge1));
+        assert_eq!(path[1], (node2_id, node3_id, edge_2));
+        assert_eq!(path[2], (node3_id, graph.root, edge_3));
     }
 
     #[test]
@@ -243,18 +234,34 @@ mod tests {
         let node2_id = graph.get_node_id("node2").unwrap();
         let node3_id = graph.get_node_id("node3").unwrap();
 
-        graph.connect(node1_id, Some(node2_id), AudioGraphEdge::Add);
-        graph.connect(node2_id, Some(node3_id), AudioGraphEdge::Crossfade);
-        graph.connect(node3_id, None, AudioGraphEdge::Subtract);
+        let edge1 = graph
+            .connect(
+                node1_id,
+                Some(node2_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge2 = graph
+            .connect(
+                node2_id,
+                Some(node3_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge3 = graph
+            .connect(node3_id, None, AudioGraphEdge::new(AddOperation, "AddOp"))
+            .unwrap();
 
         let path = graph.collect_dependents(node1_id);
         println!("Collected path: {:?}", path);
 
         assert_eq!(path.len(), 3);
 
-        assert_eq!(path[0], (node1_id, node2_id, AudioGraphEdge::Add));
-        assert_eq!(path[1], (node2_id, node3_id, AudioGraphEdge::Crossfade));
-        assert_eq!(path[2], (node3_id, graph.root, AudioGraphEdge::Subtract));
+        assert_eq!(path[0], (node1_id, node2_id, edge1));
+        assert_eq!(path[1], (node2_id, node3_id, edge2));
+        assert_eq!(path[2], (node3_id, graph.root, edge3));
     }
 
     #[test]
@@ -269,13 +276,57 @@ mod tests {
         let node6_id = graph.get_node_id("node6").unwrap();
         let node7_id = graph.get_node_id("node7").unwrap();
 
-        graph.connect(node1_id, Some(node3_id), AudioGraphEdge::Add);
-        graph.connect(node2_id, Some(node3_id), AudioGraphEdge::Add);
-        graph.connect(node3_id, Some(node4_id), AudioGraphEdge::Add);
-        graph.connect(node5_id, Some(node4_id), AudioGraphEdge::Add);
-        graph.connect(node6_id, Some(node5_id), AudioGraphEdge::Add);
-        graph.connect(node7_id, Some(node5_id), AudioGraphEdge::Add);
-        graph.connect(node4_id, None, AudioGraphEdge::Add);
+        let edge1 = graph
+            .connect(
+                node1_id,
+                Some(node3_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge2 = graph
+            .connect(
+                node2_id,
+                Some(node3_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge3 = graph
+            .connect(
+                node3_id,
+                Some(node4_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge4 = graph
+            .connect(
+                node5_id,
+                Some(node4_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge5 = graph
+            .connect(
+                node6_id,
+                Some(node5_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge6 = graph
+            .connect(
+                node7_id,
+                Some(node5_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge7 = graph
+            .connect(node4_id, None, AudioGraphEdge::new(AddOperation, "AddOp"))
+            .unwrap();
 
         graph.print_graph();
 
@@ -284,9 +335,9 @@ mod tests {
 
         assert_eq!(path.len(), 3);
 
-        assert_eq!(path[0], (node1_id, node3_id, AudioGraphEdge::Add));
-        assert_eq!(path[1], (node3_id, node4_id, AudioGraphEdge::Add));
-        assert_eq!(path[2], (node4_id, graph.root, AudioGraphEdge::Add));
+        assert_eq!(path[0], (node1_id, node3_id, edge1));
+        assert_eq!(path[1], (node3_id, node4_id, edge3));
+        assert_eq!(path[2], (node4_id, graph.root, edge7));
     }
 
     #[test]
@@ -303,17 +354,81 @@ mod tests {
         let node8_id = graph.get_node_id("node8").unwrap();
         let node9_id = graph.get_node_id("node9").unwrap();
 
-        graph.connect(node1_id, Some(node4_id), AudioGraphEdge::Add);
-        graph.connect(node2_id, Some(node4_id), AudioGraphEdge::Add);
-        graph.connect(node2_id, Some(node5_id), AudioGraphEdge::Add);
-        graph.connect(node3_id, Some(node5_id), AudioGraphEdge::Add);
-        graph.connect(node7_id, Some(node5_id), AudioGraphEdge::Add);
-        graph.connect(node7_id, Some(node6_id), AudioGraphEdge::Add);
-        graph.connect(node3_id, Some(node9_id), AudioGraphEdge::Add);
-        graph.connect(node1_id, Some(node8_id), AudioGraphEdge::Add);
-        graph.connect(node4_id, None, AudioGraphEdge::Add);
-        graph.connect(node5_id, None, AudioGraphEdge::Add);
-        graph.connect(node6_id, None, AudioGraphEdge::Add);
+        let edge1 = graph
+            .connect(
+                node1_id,
+                Some(node4_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge2 = graph
+            .connect(
+                node2_id,
+                Some(node4_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge3 = graph
+            .connect(
+                node2_id,
+                Some(node5_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge4 = graph
+            .connect(
+                node3_id,
+                Some(node5_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge5 = graph
+            .connect(
+                node7_id,
+                Some(node5_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge6 = graph
+            .connect(
+                node7_id,
+                Some(node6_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge7 = graph
+            .connect(
+                node3_id,
+                Some(node9_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge8 = graph
+            .connect(
+                node1_id,
+                Some(node8_id),
+                AudioGraphEdge::new(AddOperation, "AddOp"),
+            )
+            .unwrap();
+
+        let edge9 = graph
+            .connect(node4_id, None, AudioGraphEdge::new(AddOperation, "AddOp"))
+            .unwrap();
+
+        let edge10 = graph
+            .connect(node5_id, None, AudioGraphEdge::new(AddOperation, "AddOp"))
+            .unwrap();
+
+        let edge11 = graph
+            .connect(node6_id, None, AudioGraphEdge::new(AddOperation, "AddOp"))
+            .unwrap();
 
         graph.print_graph();
 
@@ -321,8 +436,8 @@ mod tests {
         println!("Collected path: {:?}", path);
 
         assert_eq!(path.len(), 3);
-        assert_eq!(path[0], (node1_id, node8_id, AudioGraphEdge::Add));
-        assert_eq!(path[1], (node1_id, node4_id, AudioGraphEdge::Add));
-        assert_eq!(path[2], (node4_id, graph.root, AudioGraphEdge::Add));
+        assert_eq!(path[0], (node1_id, node8_id, edge8));
+        assert_eq!(path[1], (node1_id, node4_id, edge1));
+        assert_eq!(path[2], (node4_id, graph.root, edge9));
     }
 }
