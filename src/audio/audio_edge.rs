@@ -3,7 +3,6 @@ use super::audio_node::AudioNode;
 use super::audio_processor::AudioProcessor;
 use crate::audio::audio_clip::AudioClipTrait;
 use dasp::Frame;
-use dasp::Sample;
 use std::fmt;
 use std::sync::MutexGuard;
 
@@ -51,14 +50,12 @@ pub struct AddOperation;
 impl<F: Frame<Sample = f32> + Default + Copy> LinearOperation<F> for AddOperation {}
 impl<F: Frame<Sample = f32> + Default + Copy> AudioOperation<F> for AddOperation {
     fn apply(&self, parent_node: &AudioNode<F>, child_node: &AudioNode<F>) {
-        let (overlap_start, overlap_end) =
-            AudioProcessor::<F>::normalize_clip_bounds(parent_node, child_node);
+        let child_start = child_node.get_clip_start();
+        let parent_start = parent_node.get_clip_start();
+        let (overlap_start, overlap_end) = child_node.get_absolute_delta_range().unwrap();
 
         let parent_clip: MutexGuard<'_, AudioClip<F>> = parent_node.get_clip();
         let mut child_clip: MutexGuard<'_, AudioClip<F>> = child_node.get_clip();
-
-        let child_start = child_clip.get_start_time_frame();
-        let parent_start = parent_clip.get_start_time_frame();
 
         let parent_samples: &[F] = parent_clip.get_frames_ref();
         let child_samples: &mut [F] = child_clip.get_frames_mut();

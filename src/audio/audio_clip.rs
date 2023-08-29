@@ -15,12 +15,10 @@ pub trait AudioClipTrait {
     fn get_frames_mut(&mut self) -> &mut [Self::S];
     fn get_frame(&self, idx: usize) -> Option<Self::S>;
     fn get_sample_rate(&self) -> u32;
-    fn get_start_time_frame(&self) -> usize;
     fn get_length(&self) -> usize;
 
     // Setters
     fn set_frame(&mut self, idx: usize, val: Self::S);
-    fn set_start_time_frame(&mut self, sample_idx: usize);
     fn resample(&self, sample_rate: u32) -> Self
     where
         Self: Sized;
@@ -33,7 +31,6 @@ pub trait AudioClipTrait {
 pub struct AudioClip<F> {
     frames: Vec<F>,
     sample_rate: u32,
-    start_time_frame: usize,
 }
 
 impl<F> AudioClipTrait for AudioClip<F>
@@ -51,7 +48,6 @@ where
         Self {
             frames,
             sample_rate: sample_rate as u32,
-            start_time_frame: 0,
         }
     }
 
@@ -62,7 +58,6 @@ where
         Self {
             frames,
             sample_rate: sample_rate as u32,
-            start_time_frame: 0,
         }
     }
 
@@ -87,10 +82,6 @@ where
         self.sample_rate
     }
 
-    fn get_start_time_frame(&self) -> usize {
-        self.start_time_frame
-    }
-
     fn get_length(&self) -> usize {
         self.frames.len()
     }
@@ -99,10 +90,6 @@ where
     // Todo Should return Results
     fn set_frame(&mut self, idx: usize, val: Self::S) {
         self.frames[idx] = val;
-    }
-
-    fn set_start_time_frame(&mut self, sample_idx: usize) {
-        self.start_time_frame = sample_idx;
     }
 
     fn resize_frames(&mut self, new_size: usize, value: Self::S) {
@@ -135,7 +122,6 @@ where
         Self {
             frames,
             sample_rate,
-            start_time_frame: self.start_time_frame,
         }
     }
 
@@ -152,7 +138,6 @@ impl AudioClip<[f32; 1]> {
         Self {
             frames,
             sample_rate,
-            start_time_frame: 0,
         }
     }
 
@@ -162,7 +147,6 @@ impl AudioClip<[f32; 1]> {
         AudioClip {
             frames: stereo_frames,
             sample_rate: self.sample_rate,
-            start_time_frame: 0,
         }
     }
 }
@@ -177,7 +161,6 @@ impl AudioClip<[f32; 2]> {
         Self {
             frames,
             sample_rate,
-            start_time_frame: 0,
         }
     }
 
@@ -191,7 +174,6 @@ impl AudioClip<[f32; 2]> {
         AudioClip {
             frames: mono_frames,
             sample_rate: self.sample_rate,
-            start_time_frame: 0,
         }
     }
 }
@@ -231,7 +213,6 @@ mod tests {
         let input_clip = AudioClip {
             frames: input_samples,
             sample_rate: 44100,
-            start_time_frame: 0,
         };
 
         let output_clip = input_clip.resample(88200);
@@ -245,7 +226,6 @@ mod tests {
         let input_clip = AudioClip {
             frames: input_samples,
             sample_rate: 44100,
-            start_time_frame: 0,
         };
 
         let output_clip = input_clip.resample(88200);
@@ -259,7 +239,6 @@ mod tests {
         let input_clip = AudioClip {
             frames: input_samples,
             sample_rate: 44100,
-            start_time_frame: 0,
         };
         let samples = input_clip.get_frames_ref();
         assert_eq!(samples, vec![[0.0; 1]; 1000]);
@@ -271,7 +250,6 @@ mod tests {
         let input_clip = AudioClip {
             frames: input_samples,
             sample_rate: 44100,
-            start_time_frame: 0,
         };
         let samples = input_clip.get_frames_ref();
         assert_eq!(samples, vec![[0.0, 0.0]; 1000]);
@@ -283,7 +261,6 @@ mod tests {
         let input_clip = AudioClip {
             frames: input_samples,
             sample_rate: 44100,
-            start_time_frame: 0,
         };
         let sample = input_clip.get_frame(2).unwrap();
         assert_eq!(sample, [2.0]);
@@ -296,7 +273,6 @@ mod tests {
         let input_clip = AudioClip {
             frames: input_samples,
             sample_rate: 44100,
-            start_time_frame: 0,
         };
         let sample = input_clip.get_frame(2).unwrap();
         assert_eq!(sample, [2.0, 2.0]);

@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub struct AudioProcessor<F> {
     audio_graph: Arc<Mutex<AudioGraph<F>>>,
     root_frame_idx: usize,
-    root_node_index: NodeIndex,
+    pub root_node_index: NodeIndex,
     sample_rate: u32,
 }
 
@@ -30,18 +30,18 @@ where
         }
     }
 
-    pub fn lock_audio_graph(&self) -> std::sync::MutexGuard<AudioGraph<F>> {
+    pub fn lock_audio_graph(&self) -> MutexGuard<AudioGraph<F>> {
         self.audio_graph.lock().unwrap()
     }
 
-    pub fn get_root_sample(&mut self) -> Option<F> {
+    pub fn get_node_or_root_sample(&mut self, node: Option<NodeIndex>) -> Option<F> {
         self.root_frame_idx += 1;
-
+        let node_idx = node.unwrap_or(self.root_node_index);
         let audio_graph = self.lock_audio_graph();
-        let root_clip = audio_graph
-            .get_node_ref(self.root_node_index)
-            .unwrap()
-            .get_clip();
+
+        let root_node = audio_graph.get_node(node_idx).unwrap().lock().unwrap();
+        let root_clip = root_node.get_clip();
+
         root_clip.get_frame(self.root_frame_idx - 1)
     }
 
@@ -74,16 +74,22 @@ where
         edge_idx: EdgeIndex,
     ) {
         let parent_node = audio_graph
-            .get_node_ref(parent_idx)
-            .expect("Parent node not found");
-
-        let child_node = audio_graph
-            .get_node_ref(child_idx)
-            .expect("Target node not found");
+            .get_node(parent_idx)
+            .expect("Parent node not found")
+            .lock()
+            .unwrap();
 
         let effect = audio_graph.get_edge_ref(edge_idx).unwrap();
 
-        effect.operation.apply(parent_node, child_node);
+        let mut child_node = audio_graph
+            .get_node(child_idx)
+            .expect("Target node not found")
+            .lock()
+            .unwrap();
+
+        child_node.normalize_clip_bounds(&*parent_node);
+
+        effect.operation.apply(&*parent_node, &*child_node);
     }
 
     pub fn propagate_change(&self, audio_graph: &mut AudioGraph<F>, node_idx: NodeIndex) {
@@ -91,81 +97,43 @@ where
         let mut last_child_node = None;
 
         for (parent, child, _edge) in to_compute {
-            let parent_node = audio_graph
-                .get_node_ref(parent)
-                .expect("Parent node not found");
-            let child_node = audio_graph
-                .get_node_ref(child)
-                .expect("Child node not found");
+            let mut parent_node = audio_graph
+                .get_node(parent)
+                .expect("Parent node not found")
+                .lock()
+                .unwrap();
 
-            AudioProcessor::<F>::apply_delta(parent_node, child_node);
+            let mut child_node = audio_graph
+                .get_node(child)
+                .expect("Child node not found")
+                .lock()
+                .unwrap();
+
+            child_node.normalize_clip_bounds(&*parent_node);
+            child_node.apply_delta(&*parent_node);
             child_node.compute_delta();
             parent_node.commit_changes();
 
-            last_child_node = Some(child_node);
+            last_child_node = Some(child);
         }
 
-        if let Some(node) = last_child_node {
-            node.commit_changes();
+        if let Some(child_idx) = last_child_node {
+            audio_graph
+                .get_node(child_idx)
+                .expect("Child node not found")
+                .lock()
+                .unwrap()
+                .commit_changes();
         }
     }
 
-    pub fn normalize_clip_bounds(
-        parent_node: &AudioNode<F>,
-        child_node: &AudioNode<F>,
-    ) -> (usize, usize) {
-        let parent_clip = parent_node.get_clip();
-        let child_clip = child_node.get_delta_clip();
-
-        let parent_start = parent_clip.get_start_time_frame() as usize;
-        let mut child_start = child_clip.get_start_time_frame() as usize;
-
-        let parent_end = parent_start + parent_clip.get_length() as usize;
-        let mut child_end = child_start + child_clip.get_length() as usize;
-
-        if child_start > parent_start {
-            child_node.add_padding_left(parent_start);
-            child_node.set_start_time_frame(parent_start);
-            child_start = parent_start;
-        }
-
-        let new_child_end = std::cmp::max(child_end, parent_end);
-        if new_child_end > child_clip.get_length() {
-            child_node.resize_clips(new_child_end, F::EQUILIBRIUM);
-            child_end = new_child_end;
-        }
-
-        let overlap_start = std::cmp::max(parent_start, child_start);
-        let overlap_end = std::cmp::min(parent_end, child_end);
-
-        (overlap_start, overlap_end)
-    }
-
-    fn apply_delta(source_node: &AudioNode<F>, target_node: &AudioNode<F>) {
-        let (overlap_start, overlap_end) =
-            AudioProcessor::normalize_clip_bounds(source_node, target_node);
-
-        let source_delta = source_node.get_delta_clip();
-        let mut target_clip = target_node.get_clip();
-
-        let target_clip_start = target_clip.get_start_time_frame();
-        let source_delta_start = source_delta.get_start_time_frame();
-
-        let target_samples: &mut [F] = target_clip.get_frames_mut();
-        let delta_samples: &[F] = source_delta.get_frames_ref();
-
-        for i in overlap_start..overlap_end {
-            let delta_index = i - source_delta_start;
-            let target_index = i - target_clip_start;
-
-            target_samples[target_index] =
-                (target_samples[target_index].add_amp(delta_samples[delta_index])).into();
-        }
+    pub fn add_node(&mut self, node: AudioNode<F>) -> NodeIndex {
+        self.lock_audio_graph().add_data_node(node)
     }
 
     fn get_node_frames_copy(&self, node_index: NodeIndex) -> Vec<F> {
         let graph = self.lock_audio_graph();
-        let node = graph.get_node_ref(node_index).unwrap();
+        let node = graph.get_node(node_index).unwrap().lock().unwrap();
         let x = node.get_clip().get_frames_ref().clone().to_vec();
         x
     }
@@ -176,7 +144,7 @@ where
 }
 
 impl AudioProcessor<Mono<f32>> {
-    pub fn add_node(&mut self, clip: AudioClipEnum, name: Option<&str>) -> NodeIndex {
+    pub fn add_node_from_clip(&mut self, clip: AudioClipEnum, name: Option<&str>) -> NodeIndex {
         let mut clip = match clip {
             AudioClipEnum::Mono(clip) => clip,
             AudioClipEnum::Stereo(clip) => clip.to_mono(),
@@ -192,7 +160,7 @@ impl AudioProcessor<Mono<f32>> {
 }
 
 impl AudioProcessor<Stereo<f32>> {
-    pub fn add_node(&mut self, clip: AudioClipEnum, name: Option<&str>) -> NodeIndex {
+    pub fn add_node_from_clip(&mut self, clip: AudioClipEnum, name: Option<&str>) -> NodeIndex {
         let mut clip = match clip {
             AudioClipEnum::Mono(clip) => clip.to_stereo(),
             AudioClipEnum::Stereo(clip) => clip,
@@ -222,8 +190,10 @@ mod tests {
     fn test_two_nodes_to_root() {
         let mut processor = AudioProcessor::<Mono<f32>>::new();
 
-        let node1 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node1"));
-        let node2 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node2"));
+        let node1 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node1"));
+        let node2 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node2"));
 
         let add_edge = AudioGraphEdge::new(AddOperation, "AddOp");
         processor.connect(node1, None, add_edge);
@@ -233,7 +203,9 @@ mod tests {
         let expected_samples = [[2.0], [4.0], [6.0]];
 
         for expected in &expected_samples {
-            let sample = processor.get_root_sample().expect("Expected a sample");
+            let sample = processor
+                .get_node_or_root_sample(None)
+                .expect("Expected a sample");
             assert_eq!(sample, *expected);
         }
     }
@@ -242,10 +214,14 @@ mod tests {
     fn test_audio_processor_complex_graph() {
         let mut processor = AudioProcessor::<Mono<f32>>::new();
 
-        let node1 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node1"));
-        let node2 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node2"));
-        let node3 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node3"));
-        let node4 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node4"));
+        let node1 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node1"));
+        let node2 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node2"));
+        let node3 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node3"));
+        let node4 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node4"));
 
         let add_edge = AudioGraphEdge::new(AddOperation, "AddOp");
         processor.connect(node1, Some(node3), add_edge);
@@ -271,7 +247,9 @@ mod tests {
         let expected_samples = [[4.0], [8.0], [12.0]];
 
         for expected in &expected_samples {
-            let sample = processor.get_root_sample().expect("Expected a sample");
+            let sample = processor
+                .get_node_or_root_sample(None)
+                .expect("Expected a sample");
             assert_eq!(sample, *expected);
         }
     }
@@ -281,14 +259,22 @@ mod tests {
         let mut processor = AudioProcessor::<Mono<f32>>::new();
 
         // Create nodes
-        let node1 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node1"));
-        let node2 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node2"));
-        let node3 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node3"));
-        let node4 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node4"));
-        let node5 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node5"));
-        let node6 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node6"));
-        let node7 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node7"));
-        let node8 = processor.add_node(AudioClipEnum::Mono(create_simple_clip()), Some("node8"));
+        let node1 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node1"));
+        let node2 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node2"));
+        let node3 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node3"));
+        let node4 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node4"));
+        let node5 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node5"));
+        let node6 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node6"));
+        let node7 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node7"));
+        let node8 =
+            processor.add_node_from_clip(AudioClipEnum::Mono(create_simple_clip()), Some("node8"));
 
         let add_edge = AudioGraphEdge::new(AddOperation, "AddOp");
         processor.connect(node1, Some(node3), add_edge);
@@ -340,7 +326,9 @@ mod tests {
         let expected_samples = [[7.0], [14.0], [21.0]];
 
         for expected in &expected_samples {
-            let sample = processor.get_root_sample().expect("Expected a sample");
+            let sample = processor
+                .get_node_or_root_sample(None)
+                .expect("Expected a sample");
             assert_eq!(sample, *expected);
         }
 
@@ -356,43 +344,235 @@ mod tests {
         let expected_samples = [[8.0], [16.0], [24.0]];
         processor.set_root_frame_idx(0);
         for expected in &expected_samples {
-            let sample = processor.get_root_sample().expect("Expected a sample");
+            let sample = processor
+                .get_node_or_root_sample(None)
+                .expect("Expected a sample");
             assert_eq!(sample, *expected);
         }
     }
 
-    fn create_clip_with_size_start(size: usize, start: usize) -> AudioClip<Mono<f32>> {
+    fn create_unit_node(size: usize) -> AudioNode<Mono<f32>> {
         let mut frames = Vec::with_capacity(size);
         for _ in 0..size {
             frames.push(1.0);
         }
-        let mut clip = AudioClip::<Mono<f32>>::new(frames, 44100);
-        clip.set_start_time_frame(start);
-        clip
+        let clip = AudioClip::<Mono<f32>>::new(frames, 44100);
+        AudioNode::new(clip, None)
     }
     #[test]
     fn test_normalize_clip_bounds() {
         let mut processor = AudioProcessor::<Mono<f32>>::new();
 
-        let clip1 = create_clip_with_size_start(10, 0);
-        let clip2 = create_clip_with_size_start(10, 5);
+        let node1 = create_unit_node(3);
+        let mut node2 = create_unit_node(3);
 
-        let clip3 = create_clip_with_size_start(10, 5);
-        let clip4 = create_clip_with_size_start(10, 0);
+        let mut node3 = create_unit_node(5);
+        let mut node4 = create_unit_node(3);
 
-        let node_idx1 = processor.add_node(AudioClipEnum::Mono(clip1), Some("node1"));
-        let node_idx2 = processor.add_node(AudioClipEnum::Mono(clip2), Some("node2"));
-        let node_idx3 = processor.add_node(AudioClipEnum::Mono(clip3), Some("node3"));
-        let node_idx4 = processor.add_node(AudioClipEnum::Mono(clip4), Some("node4"));
+        node2.set_clip_start(4);
+        node3.set_clip_start(0);
+        node4.set_clip_start(7);
 
-        let graph = processor.lock_audio_graph();
+        let node_id1 = processor.add_node(node1);
+        let node_id2 = processor.add_node(node2);
+        let node_id3 = processor.add_node(node3);
+        let node_id4 = processor.add_node(node4);
 
-        let node1 = graph.get_node_ref(node_idx1).unwrap();
-        let node2 = graph.get_node_ref(node_idx2).unwrap();
+        let add_edge = AudioGraphEdge::new(AddOperation, "AddOp");
+        processor.connect(node_id1, Some(node_id2), add_edge);
+        let frames = processor.get_node_frames_copy(node_id2);
+        let expected_frames = vec![[1.0], [1.0], [1.0], [0.0], [1.0], [1.0], [1.0]]; // previous node5 + node8
+        assert_eq!(frames, expected_frames);
 
-        let (overlap_start, overlap_end) =
-            AudioProcessor::<Mono<f32>>::normalize_clip_bounds(node1, node2);
+        let add_edge = AudioGraphEdge::new(AddOperation, "AddOp");
+        processor.connect(node_id3, Some(node_id4), add_edge);
 
-        assert_eq!((overlap_start, overlap_end), (0, 10));
+        processor.print_graph();
+        let frames = processor.get_node_frames_copy(node_id4);
+        let expected_frames = vec![
+            [1.0],
+            [1.0],
+            [1.0],
+            [1.0],
+            [1.0],
+            [0.0],
+            [0.0],
+            [1.0],
+            [1.0],
+            [1.0],
+        ]; // previous node5 + node8
+        assert_eq!(frames, expected_frames);
+    }
+
+    #[test]
+    fn test_complex_tree_normalize_clip_bounds() {
+        let mut processor = AudioProcessor::<Mono<f32>>::new();
+
+        let mut node1 = create_unit_node(3);
+        let mut node2 = create_unit_node(5);
+        let mut node3 = create_unit_node(3);
+        let mut node4 = create_unit_node(3);
+        let mut node5 = create_unit_node(5);
+
+        node1.set_clip_start(0);
+        node2.set_clip_start(4);
+        node3.set_clip_start(0);
+        node4.set_clip_start(7);
+        node5.set_clip_start(2);
+
+        let node_id1 = processor.add_node(node1); // 0-3
+        let node_id2 = processor.add_node(node2); // 4-5
+        let node_id3 = processor.add_node(node3); // 0-3
+        let node_id4 = processor.add_node(node4); // 7-3
+        let node_id5 = processor.add_node(node5); // 2-5
+
+        // Connect Node5 directly to the Root Node
+        let root_edge = AudioGraphEdge::new(AddOperation, "RootOp");
+        processor.connect(node_id5, None, root_edge);
+
+        let frames_node_root = processor.get_node_frames_copy(processor.root_node_index);
+        let expected_frames_root = vec![[0.0], [0.0], [1.0], [1.0], [1.0], [1.0], [1.0], [0.0]]; // node5 + node1 from time frame 2
+        assert_eq!(frames_node_root[0..8], expected_frames_root);
+
+        // Connect Node1 and Node2 to Node5
+        let add_edge1 = AudioGraphEdge::new(AddOperation, "AddOp1");
+        processor.connect(node_id1, Some(node_id5), add_edge1);
+
+        let frames_node1 = processor.get_node_frames_copy(node_id5);
+        let expected_frames_node1 = vec![[1.0], [1.0], [2.0], [1.0], [1.0], [1.0], [1.0]]; // node5 + node1 from time frame 2
+        assert_eq!(frames_node1, expected_frames_node1);
+
+        let frames_node_root = processor.get_node_frames_copy(processor.root_node_index);
+        let expected_frames_root = vec![[1.0], [1.0], [2.0], [1.0], [1.0], [1.0], [1.0], [0.0]]; // node5 + node1 from time frame 2
+        assert_eq!(frames_node_root[0..8], expected_frames_root);
+
+        let add_edge2 = AudioGraphEdge::new(AddOperation, "AddOp2");
+        processor.connect(node_id2, Some(node_id5), add_edge2);
+
+        let node_5 = processor.get_node_frames_copy(node_id5);
+        let expected_node_5 = vec![
+            [1.0],
+            [1.0],
+            [2.0],
+            [1.0],
+            [2.0],
+            [2.0],
+            [2.0],
+            [1.0],
+            [1.0],
+        ]; // node5 + node1 from time frame 2
+        assert_eq!(node_5, expected_node_5);
+
+        let frames_node_root = processor.get_node_frames_copy(processor.root_node_index);
+        let expected_frames_root = vec![
+            [1.0],
+            [1.0],
+            [2.0],
+            [1.0],
+            [2.0],
+            [2.0],
+            [2.0],
+            [1.0],
+            [1.0],
+            [0.0],
+        ]; // node5 + node1 from time frame 2
+        assert_eq!(frames_node_root[0..10], expected_frames_root);
+
+        // Connect Node3 and Node4 to Node2
+        let add_edge3 = AudioGraphEdge::new(AddOperation, "AddOp3");
+        processor.connect(node_id3, Some(node_id2), add_edge3);
+
+        let node_2 = processor.get_node_frames_copy(node_id2);
+        let expected_node_2 = vec![
+            [1.0],
+            [1.0],
+            [1.0],
+            [0.0],
+            [1.0],
+            [1.0],
+            [1.0],
+            [1.0],
+            [1.0],
+        ];
+        assert_eq!(node_2, expected_node_2);
+
+        let node_5 = processor.get_node_frames_copy(node_id5);
+        let expected_node_5 = vec![
+            [2.0],
+            [2.0],
+            [3.0],
+            [1.0],
+            [2.0],
+            [2.0],
+            [2.0],
+            [1.0],
+            [1.0],
+        ];
+        assert_eq!(node_5, expected_node_5);
+
+        let frames_node_root = processor.get_node_frames_copy(processor.root_node_index);
+        let expected_frames_root = vec![
+            [2.0],
+            [2.0],
+            [3.0],
+            [1.0],
+            [2.0],
+            [2.0],
+            [2.0],
+            [1.0],
+            [1.0],
+            [0.0],
+        ];
+        assert_eq!(frames_node_root[0..10], expected_frames_root);
+
+        let add_edge4 = AudioGraphEdge::new(AddOperation, "AddOp4");
+        processor.connect(node_id4, Some(node_id2), add_edge4);
+
+        let node_2 = processor.get_node_frames_copy(node_id2);
+        let expected_node_2 = vec![
+            [1.0],
+            [1.0],
+            [1.0],
+            [0.0],
+            [1.0],
+            [1.0],
+            [1.0],
+            [2.0],
+            [2.0],
+            [1.0],
+        ];
+        assert_eq!(node_2, expected_node_2);
+
+        let node_5 = processor.get_node_frames_copy(node_id5);
+        let expected_node_5 = vec![
+            [2.0],
+            [2.0],
+            [3.0],
+            [1.0],
+            [2.0],
+            [2.0],
+            [2.0],
+            [2.0],
+            [2.0],
+            [1.0],
+        ];
+        assert_eq!(node_5, expected_node_5);
+
+        let frames_node_root = processor.get_node_frames_copy(processor.root_node_index);
+        let expected_frames_root = vec![
+            [2.0],
+            [2.0],
+            [3.0],
+            [1.0],
+            [2.0],
+            [2.0],
+            [2.0],
+            [2.0],
+            [2.0],
+            [1.0],
+            [0.0],
+        ];
+        assert_eq!(frames_node_root[0..11], expected_frames_root);
+        processor.print_graph();
     }
 }

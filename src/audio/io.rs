@@ -5,7 +5,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-
 pub struct AudioIO {
     _host: cpal::Host,
     // Output
@@ -53,7 +52,6 @@ impl AudioIO {
     }
 
     pub fn record(&self) -> Option<(Vec<f32>, u32, u32)> {
-    
         let clip = Vec::new();
         let clip = Arc::new(Mutex::new(Some(clip)));
         let clip_2 = Arc::clone(&clip);
@@ -99,5 +97,3 @@ impl AudioIO {
         Some((clip, sample_rate, channels as u32))
     }
 }
-
-

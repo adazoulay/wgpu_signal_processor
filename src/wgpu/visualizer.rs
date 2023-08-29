@@ -1,5 +1,3 @@
-use crate::audio::audio_state::{AudioStateMetatada, SpectrumType};
-
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
@@ -8,6 +6,11 @@ use winit::{
 };
 
 use rustfft::{num_complex::Complex, FftPlanner};
+
+pub enum SpectrumType {
+    Time,
+    Frequency,
+}
 
 struct State {
     surface: wgpu::Surface,
@@ -275,10 +278,7 @@ impl State {
     }
 }
 
-pub async fn run_visualizer(
-    audio_state: AudioStateMetatada,
-    rx: std::sync::mpsc::Receiver<Vec<f32>>,
-) {
+pub async fn run_visualizer(rx: std::sync::mpsc::Receiver<Vec<f32>>) {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 

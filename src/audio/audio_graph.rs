@@ -8,17 +8,25 @@ use petgraph::stable_graph::{EdgeIndex, NodeIndex, StableDiGraph};
 use petgraph::visit::{Dfs, EdgeRef};
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::{Arc, Mutex};
 
 pub enum AudioGraphNode<F> {
-    RootNode(AudioNode<F>),
-    DataNode(AudioNode<F>),
+    RootNode(Arc<Mutex<AudioNode<F>>>),
+    DataNode(Arc<Mutex<AudioNode<F>>>),
 }
 
-impl<F> fmt::Display for AudioGraphNode<F> {
+impl<F> fmt::Display for AudioGraphNode<F>
+where
+    F: dasp::Frame<Sample = f32> + Copy,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AudioGraphNode::DataNode(node) => write!(f, "{}", node.name),
-            AudioGraphNode::RootNode(node) => write!(f, "{}", node.name),
+            AudioGraphNode::DataNode(node) => write!(
+                f,
+                "{}",
+                node.lock().unwrap().get_name().unwrap_or("default")
+            ),
+            AudioGraphNode::RootNode(_) => write!(f, "Root Node"),
         }
     }
 }
@@ -38,7 +46,8 @@ where
         let mut graph = StableDiGraph::new();
         let node_lookup = HashMap::new();
         let clip = AudioClip::<F>::default();
-        let audio_node = AudioGraphNode::RootNode(AudioNode::new(clip, Some("root")));
+        let audio_node =
+            AudioGraphNode::RootNode(Arc::new(Mutex::new(AudioNode::new(clip, Some("root")))));
         let root: petgraph::stable_graph::NodeIndex = graph.add_node(audio_node);
         Self {
             graph,
@@ -48,19 +57,30 @@ where
         }
     }
 
-    pub fn add_data_node(&mut self, audio_node: AudioNode<F>) -> NodeIndex {
-        //Todo  Add node_id in case of no name
-        let name = audio_node.get_name().to_string();
-        let node_id = self.graph.add_node(AudioGraphNode::DataNode(audio_node));
+    pub fn add_data_node(&mut self, mut audio_node: AudioNode<F>) -> NodeIndex {
+        let name = match audio_node.get_name() {
+            Some(n) => n.to_string(),
+            None => {
+                let name = format!("Node{}", self.node_id);
+                audio_node.set_name(&name);
+                self.node_id += 1;
+                name
+            }
+        };
+
+        let node_id = self
+            .graph
+            .add_node(AudioGraphNode::DataNode(Arc::new(Mutex::new(audio_node))));
+
         self.node_lookup.insert(name, node_id);
         node_id
     }
 
     pub fn create_indexed_node(&mut self) -> AudioNode<F> {
-        let name = &self.node_id.to_string();
+        let name = format!("Node{}", self.node_id);
         self.node_id += 1;
         let clip = AudioClip::<F>::default();
-        AudioNode::new(clip, Some(name))
+        AudioNode::new(clip, Some(&name))
     }
 
     pub fn connect(
@@ -100,14 +120,7 @@ where
         self.node_lookup.get(id).cloned()
     }
 
-    pub fn get_node_mut(&mut self, node_idx: NodeIndex) -> Option<&mut AudioNode<F>> {
-        match &mut self.graph[node_idx] {
-            AudioGraphNode::RootNode(node) => Some(node),
-            AudioGraphNode::DataNode(node) => Some(node),
-        }
-    }
-
-    pub fn get_node_ref(&self, node_idx: NodeIndex) -> Option<&AudioNode<F>> {
+    pub fn get_node(&self, node_idx: NodeIndex) -> Option<&Arc<Mutex<AudioNode<F>>>> {
         match &self.graph[node_idx] {
             AudioGraphNode::RootNode(node) => Some(node),
             AudioGraphNode::DataNode(node) => Some(node),
@@ -181,8 +194,44 @@ mod tests {
         let node = AudioNode::new(clip, Some("test_node"));
 
         let index = graph.add_data_node(node);
-        assert!(graph.get_node_ref(index).is_some());
-        assert_eq!(graph.get_node_ref(index).unwrap().get_name(), "test_node");
+        assert!(graph.get_node(index).is_some());
+        assert_eq!(
+            graph
+                .get_node(index)
+                .unwrap()
+                .lock()
+                .unwrap()
+                .get_name()
+                .unwrap(),
+            "test_node"
+        );
+
+        let clip2 = AudioClip::<Mono<f32>>::default();
+        let mut node2 = AudioNode::new(clip2, None);
+        let index2 = graph.add_data_node(node2);
+        assert_eq!(
+            graph
+                .get_node(index2)
+                .unwrap()
+                .lock()
+                .unwrap()
+                .get_name()
+                .unwrap(),
+            "Node1"
+        );
+        let clip3 = AudioClip::<Mono<f32>>::default();
+        let node3 = AudioNode::new(clip3, None);
+        let index3 = graph.add_data_node(node3);
+        assert_eq!(
+            graph
+                .get_node(index3)
+                .unwrap()
+                .lock()
+                .unwrap()
+                .get_name()
+                .unwrap(),
+            "Node2"
+        );
     }
 
     #[test]
@@ -193,8 +242,17 @@ mod tests {
         let node = AudioNode::new(clip, Some("test_node"));
 
         let index = graph.add_data_node(node);
-        assert!(graph.get_node_ref(index).is_some());
-        assert_eq!(graph.get_node_ref(index).unwrap().get_name(), "test_node");
+        assert!(graph.get_node(index).is_some());
+        assert_eq!(
+            graph
+                .get_node(index)
+                .unwrap()
+                .lock()
+                .unwrap()
+                .get_name()
+                .unwrap(),
+            "test_node"
+        );
     }
 
     #[test]
